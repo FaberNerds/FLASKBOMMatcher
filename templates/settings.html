@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+
+{% block title %}BOM Matcher - Settings{% endblock %}
+
+{% block topbar_actions %}
+<a href="/" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">&lt;&lt; Back</a>
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 700px; margin: 0 auto;">
+    <h2 style="margin-bottom: 24px;">Settings</h2>
+
+    <!-- Exact DB Connection -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">Exact Database Connection</h3>
+            <p class="card-subtitle">Uses Windows Credential Manager (keyring) — same as ExactSearchTool</p>
+        </div>
+        <div class="card-body">
+            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
+                Credentials are managed via Windows Credential Manager (service: Prod_SQL_DB_Luminovo).
+                Use the button below to verify the connection works.
+            </p>
+            <button class="btn btn-primary" id="testConnectionBtn" onclick="testConnection()">
+                Test Connection
+            </button>
+            <span id="connectionResult" style="margin-left: 12px; font-size: 13px;"></span>
+        </div>
+    </div>
+
+    <!-- AI Provider -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">AI Provider</h3>
+        </div>
+        <div class="card-body">
+            <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="radio" name="aiProvider" value="mistral" id="providerMistral">
+                    Mistral
+                </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="radio" name="aiProvider" value="openrouter" id="providerOpenrouter">
+                    OpenRouter (fallback)
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mistral API Key -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">Mistral API Key</h3>
+        </div>
+        <div class="card-body">
+            <div style="display: flex; gap: 8px;">
+                <input type="password" class="form-input" id="mistralKey" placeholder="Enter Mistral API key"
+                       style="flex: 1;">
+                <button class="btn btn-primary" onclick="saveMistralKey()">Save</button>
+            </div>
+            <p id="mistralStatus" style="font-size: 12px; color: var(--text-muted); margin-top: 8px;"></p>
+        </div>
+    </div>
+
+    <!-- OpenRouter API Key -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">OpenRouter API Key</h3>
+        </div>
+        <div class="card-body">
+            <div style="display: flex; gap: 8px;">
+                <input type="password" class="form-input" id="openrouterKey" placeholder="Enter OpenRouter API key"
+                       style="flex: 1;">
+                <button class="btn btn-primary" onclick="saveOpenrouterKey()">Save</button>
+            </div>
+            <p id="openrouterStatus" style="font-size: 12px; color: var(--text-muted); margin-top: 8px;"></p>
+        </div>
+    </div>
+
+    <!-- ERP Description Examples -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">ERP Description Examples</h3>
+            <p class="card-subtitle">Paste example descriptions from Exact so the AI knows the format</p>
+        </div>
+        <div class="card-body">
+            <textarea class="form-input" id="erpExamples" rows="6"
+                      placeholder="RES 10K 1% 0,125W 0805&#10;CAP 100NF 50V X7R 0402&#10;IC REG LIN 3.3V 500MA SOT223"
+                      style="width: 100%; font-family: var(--font-family-mono); font-size: 12px;"></textarea>
+            <button class="btn btn-primary" onclick="saveErpExamples()" style="margin-top: 8px;">Save Examples</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+    // Load current settings on page load
+    async function loadSettings() {
+        try {
+            const [mistral, openrouter, provider, examples] = await Promise.all([
+                apiCall('/api/settings/mistral'),
+                apiCall('/api/settings/openrouter'),
+                apiCall('/api/settings/ai-provider'),
+                apiCall('/api/settings/erp-examples')
+            ]);
+
+            // Mistral
+            if (mistral.configured) {
+                document.getElementById('mistralStatus').textContent = `Configured: ${mistral.masked_key}`;
+            } else {
+                document.getElementById('mistralStatus').textContent = 'Not configured';
+            }
+
+            // OpenRouter
+            if (openrouter.configured) {
+                document.getElementById('openrouterStatus').textContent = `Configured: ${openrouter.masked_key}`;
+            } else {
+                document.getElementById('openrouterStatus').textContent = 'Not configured';
+            }
+
+            // Provider
+            if (provider.provider === 'openrouter') {
+                document.getElementById('providerOpenrouter').checked = true;
+            } else {
+                document.getElementById('providerMistral').checked = true;
+            }
+
+            // ERP examples
+            if (examples.examples) {
+                document.getElementById('erpExamples').value = examples.examples;
+            }
+        } catch (e) {
+            console.error('Failed to load settings:', e);
+        }
+    }
+
+    async function testConnection() {
+        const btn = document.getElementById('testConnectionBtn');
+        const result = document.getElementById('connectionResult');
+        btn.disabled = true;
+        result.textContent = 'Testing...';
+        result.style.color = 'var(--text-muted)';
+
+        try {
+            const data = await apiCall('/api/settings/test-connection', { method: 'POST' });
+            if (data.success) {
+                result.textContent = '✓ ' + data.message;
+                result.style.color = 'var(--color-success)';
+            } else {
+                result.textContent = '✕ ' + data.message;
+                result.style.color = 'var(--color-danger)';
+            }
+        } catch (e) {
+            result.textContent = '✕ ' + e.message;
+            result.style.color = 'var(--color-danger)';
+        }
+        btn.disabled = false;
+    }
+
+    async function saveMistralKey() {
+        const key = document.getElementById('mistralKey').value.trim();
+        if (!key) return toast.warning('Enter an API key');
+        try {
+            const data = await apiCall('/api/settings/mistral', {
+                method: 'POST',
+                body: JSON.stringify({ api_key: key })
+            });
+            document.getElementById('mistralStatus').textContent = `Configured: ${data.masked_key}`;
+            document.getElementById('mistralKey').value = '';
+            toast.success('Mistral API key saved');
+        } catch (e) { /* toast already shown */ }
+    }
+
+    async function saveOpenrouterKey() {
+        const key = document.getElementById('openrouterKey').value.trim();
+        if (!key) return toast.warning('Enter an API key');
+        try {
+            const data = await apiCall('/api/settings/openrouter', {
+                method: 'POST',
+                body: JSON.stringify({ api_key: key })
+            });
+            document.getElementById('openrouterStatus').textContent = `Configured: ${data.masked_key}`;
+            document.getElementById('openrouterKey').value = '';
+            toast.success('OpenRouter API key saved');
+        } catch (e) { /* toast already shown */ }
+    }
+
+    async function saveErpExamples() {
+        const examples = document.getElementById('erpExamples').value;
+        try {
+            await apiCall('/api/settings/erp-examples', {
+                method: 'POST',
+                body: JSON.stringify({ examples })
+            });
+            toast.success('ERP examples saved');
+        } catch (e) { /* toast already shown */ }
+    }
+
+    // Provider radio change
+    document.querySelectorAll('input[name="aiProvider"]').forEach(radio => {
+        radio.addEventListener('change', async (e) => {
+            try {
+                await apiCall('/api/settings/ai-provider', {
+                    method: 'POST',
+                    body: JSON.stringify({ provider: e.target.value })
+                });
+                toast.success(`AI provider set to ${e.target.value}`);
+            } catch (e) { /* toast already shown */ }
+        });
+    });
+
+    loadSettings();
+</script>
+{% endblock %}

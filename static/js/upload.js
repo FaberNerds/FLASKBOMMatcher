@@ -1,0 +1,464 @@
+/**
+ * BOM Matcher - Upload Page JavaScript
+ * Handles file upload, sheet/header selection, row range, column mapping, and navigation.
+ */
+
+const standardColumns = ['Manufacturer', 'MPN', 'Description', 'Quantity', 'Refdes', 'FaberNr'];
+let currentHeaders = [];
+let currentRows = [];
+
+// Row selection state
+let selectedHeaderRow = 0;    // 0-indexed row used as header
+let rowRange = { start: null, end: null };  // 0-indexed data row range (after header)
+
+// Context menu state
+let contextMenuRowIndex = null;
+
+// ========================================================================
+// Drop Zone
+// ========================================================================
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => {
+    dropZone.classList.remove('drag-over');
+});
+dropZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    if (e.dataTransfer.files.length > 0) {
+        uploadFile(e.dataTransfer.files[0]);
+    }
+});
+fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        uploadFile(e.target.files[0]);
+    }
+});
+
+// ========================================================================
+// File Upload
+// ========================================================================
+
+async function uploadFile(file) {
+    showLoading();
+    const formData = new FormData();
+    formData.append('file', file);
+
+    try {
+        const csrfToken = getCsrfToken();
+        const headers = {};
+        if (csrfToken) headers['X-CSRFToken'] = csrfToken;
+
+        const response = await fetch('/api/upload', {
+            method: 'POST',
+            body: formData,
+            headers
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Upload failed');
+
+        currentHeaders = data.headers;
+        currentRows = data.preview_rows;
+
+        // Reset row selection state
+        selectedHeaderRow = 0;
+        rowRange = { start: null, end: null };
+
+        // Show file info
+        document.getElementById('fileName').textContent = data.filename;
+        document.getElementById('fileRowCount').textContent = `(${data.total_rows} rows)`;
+        document.getElementById('fileInfo').style.display = 'block';
+
+        // Show sheet selector if multiple sheets
+        if (data.sheets && data.sheets.length > 1) {
+            const select = document.getElementById('sheetSelect');
+            select.innerHTML = data.sheets.map(s =>
+                `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
+            ).join('');
+            document.getElementById('sheetSelector').style.display = 'block';
+        } else {
+            document.getElementById('sheetSelector').style.display = 'none';
+        }
+
+        // Show header row slider & row range controls
+        const headerSection = document.getElementById('headerRowSection');
+        const headerSlider = document.getElementById('headerRowSlider');
+        const headerValue = document.getElementById('headerRowValue');
+        const rowRangeSection = document.getElementById('rowRangeSection');
+
+        if (headerSection) headerSection.style.display = 'block';
+        if (headerSlider) headerSlider.value = 0;
+        if (headerValue) headerValue.textContent = '1';
+        if (rowRangeSection) rowRangeSection.style.display = 'block';
+        clearRowRangeInputs();
+
+        renderPreview();
+        renderMapping();
+        document.getElementById('previewSection').style.display = 'block';
+        document.getElementById('mappingSection').style.display = 'block';
+        document.getElementById('processSection').style.display = 'block';
+
+        toast.success(`Uploaded ${data.filename}`);
+    } catch (error) {
+        toast.error(error.message);
+    } finally {
+        hideLoading();
+    }
+}
+
+// ========================================================================
+// Sheet & Header Row Changes
+// ========================================================================
+
+document.getElementById('sheetSelect')?.addEventListener('change', reloadFile);
+document.getElementById('headerRowSlider')?.addEventListener('input', (e) => {
+    document.getElementById('headerRowValue').textContent = String(parseInt(e.target.value) + 1);
+});
+document.getElementById('headerRowSlider')?.addEventListener('change', () => {
+    selectedHeaderRow = parseInt(document.getElementById('headerRowSlider').value);
+    rowRange = { start: null, end: null };
+    clearRowRangeInputs();
+    reloadFile();
+});
+
+async function reloadFile() {
+    const headerRow = parseInt(document.getElementById('headerRowSlider').value);
+    const sheetSelect = document.getElementById('sheetSelect');
+    const sheetName = sheetSelect ? sheetSelect.value : null;
+
+    // Get start/end row from state (not inputs - those are display values)
+    const startRow = rowRange.start;
+    const endRow = rowRange.end;
+
+    showLoading();
+    try {
+        const body = { header_row: headerRow, sheet_name: sheetName };
+        if (startRow !== null) body.start_row = startRow;
+        if (endRow !== null) body.end_row = endRow;
+
+        const data = await apiCall('/api/reload', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        });
+
+        currentHeaders = data.headers;
+        currentRows = data.preview_rows;
+        document.getElementById('fileRowCount').textContent = `(${data.total_rows} rows)`;
+
+        renderPreview();
+        renderMapping();
+    } catch (e) {
+        // toast shown by apiCall
+    } finally {
+        hideLoading();
+    }
+}
+
+// ========================================================================
+// Preview Table (with row numbers and highlighting)
+// ========================================================================
+
+function renderPreview() {
+    const thead = document.getElementById('previewHead');
+    const tbody = document.getElementById('previewBody');
+
+    // Header: row number column + data columns
+    thead.innerHTML = '<tr><th class="preview-row-number">#</th>' + currentHeaders.map(h =>
+        `<th>${escapeHtml(h)}</th>`
+    ).join('') + '</tr>';
+
+    // Body: each row gets a row number and right-click handler
+    tbody.innerHTML = currentRows.map((row, idx) => {
+        const rowClasses = getRowClasses(idx);
+        return `<tr class="${rowClasses}" oncontextmenu="showRowContextMenu(event, ${idx})">` +
+            `<td class="preview-row-number">${idx + 1}</td>` +
+            currentHeaders.map(h =>
+                `<td>${escapeHtml(row[h] || '')}</td>`
+            ).join('') + '</tr>';
+    }).join('');
+}
+
+function getRowClasses(rowIndex) {
+    const classes = [];
+
+    // Check if row is out of range
+    if (rowRange.start !== null || rowRange.end !== null) {
+        const start = rowRange.start !== null ? rowRange.start : 0;
+        const end = rowRange.end !== null ? rowRange.end : Infinity;
+
+        if (rowIndex < start || rowIndex > end) {
+            classes.push('row-out-of-range');
+        } else {
+            classes.push('row-in-range');
+        }
+        if (rowIndex === rowRange.start) classes.push('row-start');
+        if (rowIndex === rowRange.end) classes.push('row-end');
+    }
+
+    return classes.join(' ');
+}
+
+// ========================================================================
+// Right-Click Context Menu
+// ========================================================================
+
+function showRowContextMenu(event, rowIndex) {
+    event.preventDefault();
+    contextMenuRowIndex = rowIndex;
+
+    const menu = document.getElementById('rowContextMenu');
+    if (!menu) return;
+
+    menu.style.display = 'block';
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+
+    // Ensure menu stays within viewport
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) {
+        menu.style.left = (window.innerWidth - rect.width - 8) + 'px';
+    }
+    if (rect.bottom > window.innerHeight) {
+        menu.style.top = (window.innerHeight - rect.height - 8) + 'px';
+    }
+}
+
+function hideRowContextMenu() {
+    const menu = document.getElementById('rowContextMenu');
+    if (menu) menu.style.display = 'none';
+    contextMenuRowIndex = null;
+}
+
+// Hide context menu on click anywhere
+document.addEventListener('click', hideRowContextMenu);
+document.addEventListener('contextmenu', (e) => {
+    // Only hide if clicking outside the preview table
+    if (!e.target.closest('#previewBody')) {
+        hideRowContextMenu();
+    }
+});
+
+// ========================================================================
+// Context Menu Actions
+// ========================================================================
+
+async function setAsHeaderRow() {
+    if (contextMenuRowIndex === null) {
+        hideRowContextMenu();
+        return;
+    }
+
+    // The clicked row index is relative to the current data rows.
+    // We need to map it to the raw file row number.
+    // Current header_row + 1 (for the header itself) + contextMenuRowIndex = raw row
+    const currentHeaderRow = parseInt(document.getElementById('headerRowSlider').value);
+    const newHeaderRow = currentHeaderRow + 1 + contextMenuRowIndex;
+
+    hideRowContextMenu();
+
+    // Update slider
+    if (newHeaderRow <= 20) {
+        document.getElementById('headerRowSlider').value = newHeaderRow;
+        document.getElementById('headerRowSlider').max = Math.max(20, newHeaderRow);
+    } else {
+        document.getElementById('headerRowSlider').max = newHeaderRow;
+        document.getElementById('headerRowSlider').value = newHeaderRow;
+    }
+    document.getElementById('headerRowValue').textContent = String(newHeaderRow + 1);
+    selectedHeaderRow = newHeaderRow;
+
+    // Reset row range when header changes
+    rowRange = { start: null, end: null };
+    clearRowRangeInputs();
+
+    await reloadFile();
+    toast.success(`Row ${newHeaderRow + 1} set as header row`);
+}
+
+function setAsStartRow() {
+    if (contextMenuRowIndex === null) {
+        hideRowContextMenu();
+        return;
+    }
+
+    rowRange.start = contextMenuRowIndex;
+
+    // If end is before start, clear end
+    if (rowRange.end !== null && rowRange.end < contextMenuRowIndex) {
+        rowRange.end = null;
+    }
+
+    hideRowContextMenu();
+    updateRowRangeInputs();
+    renderPreview();
+    toast.info(`Start row set to ${contextMenuRowIndex + 1}`);
+}
+
+function setAsEndRow() {
+    if (contextMenuRowIndex === null) {
+        hideRowContextMenu();
+        return;
+    }
+
+    rowRange.end = contextMenuRowIndex;
+
+    // If start is after end, clear start
+    if (rowRange.start !== null && rowRange.start > contextMenuRowIndex) {
+        rowRange.start = null;
+    }
+
+    hideRowContextMenu();
+    updateRowRangeInputs();
+    renderPreview();
+    toast.info(`End row set to ${contextMenuRowIndex + 1}`);
+}
+
+function clearRowRangeMenu() {
+    hideRowContextMenu();
+    clearRowRange();
+}
+
+// ========================================================================
+// Row Range Controls (input fields)
+// ========================================================================
+
+function applyRowRange() {
+    const startInput = document.getElementById('startRowInput');
+    const endInput = document.getElementById('endRowInput');
+
+    const startVal = startInput.value ? parseInt(startInput.value) : null;
+    const endVal = endInput.value ? parseInt(endInput.value) : null;
+
+    // Convert from 1-indexed (display) to 0-indexed (internal)
+    rowRange.start = startVal !== null ? startVal - 1 : null;
+    rowRange.end = endVal !== null ? endVal - 1 : null;
+
+    // Validate
+    if (rowRange.start !== null && rowRange.end !== null && rowRange.start > rowRange.end) {
+        toast.warning('Start row must be before end row');
+        rowRange.start = null;
+        rowRange.end = null;
+        clearRowRangeInputs();
+        return;
+    }
+
+    renderPreview();
+
+    const rangeDesc = [];
+    if (rowRange.start !== null) rangeDesc.push(`from row ${rowRange.start + 1}`);
+    if (rowRange.end !== null) rangeDesc.push(`to row ${rowRange.end + 1}`);
+    if (rangeDesc.length > 0) {
+        toast.info(`Row range set: ${rangeDesc.join(' ')}`);
+    }
+}
+
+function clearRowRange() {
+    rowRange = { start: null, end: null };
+    clearRowRangeInputs();
+    renderPreview();
+    toast.info('Row range cleared');
+}
+
+function clearRowRangeInputs() {
+    const startInput = document.getElementById('startRowInput');
+    const endInput = document.getElementById('endRowInput');
+    if (startInput) startInput.value = '';
+    if (endInput) endInput.value = '';
+}
+
+function updateRowRangeInputs() {
+    const startInput = document.getElementById('startRowInput');
+    const endInput = document.getElementById('endRowInput');
+    // Display as 1-indexed
+    if (startInput) startInput.value = rowRange.start !== null ? rowRange.start + 1 : '';
+    if (endInput) endInput.value = rowRange.end !== null ? rowRange.end + 1 : '';
+}
+
+// ========================================================================
+// Column Mapping
+// ========================================================================
+
+function renderMapping() {
+    const grid = document.getElementById('mappingGrid');
+
+    grid.innerHTML = standardColumns.map(stdCol => {
+        const options = currentHeaders.map(h =>
+            `<option value="${escapeHtml(h)}"${autoMatch(stdCol, h) ? ' selected' : ''}>${escapeHtml(h)}</option>`
+        ).join('');
+
+        const required = stdCol === 'Description' ? ' *' : '';
+
+        return `
+            <div class="mapping-row">
+                <label class="mapping-label">${escapeHtml(stdCol)}${required}</label>
+                <select class="form-select mapping-select" data-standard="${escapeHtml(stdCol)}">
+                    <option value="">-- not mapped --</option>
+                    ${options}
+                </select>
+            </div>
+        `;
+    }).join('');
+}
+
+function autoMatch(standardCol, headerCol) {
+    const std = standardCol.toLowerCase();
+    const hdr = headerCol.toLowerCase();
+
+    const aliases = {
+        'manufacturer': ['manufacturer', 'mfr', 'mfg', 'brand', 'fabrikant'],
+        'mpn': ['mpn', 'part number', 'partnumber', 'part no', 'mfr part', 'manufacturer part'],
+        'description': ['description', 'desc', 'omschrijving', 'component', 'part description'],
+        'quantity': ['quantity', 'qty', 'aantal', 'count', 'amount'],
+        'refdes': ['refdes', 'reference', 'ref des', 'designator', 'reference designator'],
+        'fabernr': ['fabernr', 'ipn', 'internal part', 'faber', 'internal', 'faber nr']
+    };
+
+    const aliasList = aliases[std] || [std];
+    return aliasList.some(a => hdr.includes(a));
+}
+
+// ========================================================================
+// Process BOM
+// ========================================================================
+
+async function processBom() {
+    // Collect mapping
+    const mapping = {};
+    document.querySelectorAll('.mapping-select').forEach(select => {
+        const stdCol = select.dataset.standard;
+        const value = select.value;
+        if (value) {
+            mapping[stdCol] = value;
+        }
+    });
+
+    // Validate: Description is required
+    if (!mapping['Description']) {
+        toast.warning('Please map the Description column (required)');
+        return;
+    }
+
+    showLoading();
+    try {
+        // If row range is set, reload with the range first to filter data
+        if (rowRange.start !== null || rowRange.end !== null) {
+            await reloadFile();
+        }
+
+        await apiCall('/api/set-mapping', {
+            method: 'POST',
+            body: JSON.stringify({ mapping })
+        });
+        window.location.href = '/process';
+    } catch (e) {
+        hideLoading();
+    }
+}

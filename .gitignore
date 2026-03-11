@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Flask/Temporary files
+uploads/
+temp/
+server.log
+instance/
+.webassets-cache
+
+# OS
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
+
+# SSL certificates
+ssl/
+**/key.pem
+ssl2/
+
+# Spec file
+*.md
+!README.md

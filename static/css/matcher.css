@@ -1,0 +1,336 @@
+/**
+ * BOM Matcher - App-specific styles
+ * Extends the shared design system (main.css)
+ */
+
+/* ========================================
+   UPLOAD ZONE
+   ======================================== */
+
+.upload-zone {
+    border: 2px dashed var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 48px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--transition-base);
+    background: var(--color-gray-50);
+}
+
+.upload-zone:hover,
+.upload-zone.drag-over {
+    border-color: var(--color-primary);
+    background: var(--color-primary-light);
+}
+
+/* ========================================
+   COLUMN MAPPING
+   ======================================== */
+
+.mapping-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.mapping-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.mapping-label {
+    min-width: 100px;
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-main);
+}
+
+.mapping-select {
+    flex: 1;
+}
+
+/* ========================================
+   BOM TABLE ROW COLORS
+   ======================================== */
+
+.row-matched {
+    background-color: #d1fae5 !important; /* green-100 */
+}
+
+.row-suggestion {
+    background-color: #fef3c7 !important; /* yellow-100 */
+}
+
+.row-nomatch {
+    background-color: #fee2e2 !important; /* red-100 */
+}
+
+.row-mpnfree {
+    background-color: #f3f4f6 !important; /* gray-100 */
+}
+
+.row-matched:hover,
+.row-suggestion:hover,
+.row-nomatch:hover,
+.row-mpnfree:hover {
+    filter: brightness(0.97);
+}
+
+/* ========================================
+   FABERNR INPUT & MPNFREE SELECT
+   ======================================== */
+
+.fabernr-input {
+    background: white;
+    font-family: var(--font-family-mono);
+}
+
+.fabernr-input:focus {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -1px;
+}
+
+.mpnfree-select {
+    padding: 2px 4px;
+    font-size: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: white;
+    cursor: pointer;
+}
+
+/* ========================================
+   ICON BUTTON
+   ======================================== */
+
+.btn-icon {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 14px;
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+}
+
+.btn-icon:hover {
+    background: var(--color-gray-200);
+}
+
+/* ========================================
+   LEGEND
+   ======================================== */
+
+.legend-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    vertical-align: middle;
+    margin-right: 4px;
+}
+
+.legend-green { background: #10b981; }
+.legend-yellow { background: #f59e0b; }
+.legend-red { background: #ef4444; }
+.legend-gray { background: #9ca3af; }
+
+/* ========================================
+   SUGGESTION PANEL
+   ======================================== */
+
+.suggestion-panel {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 50vh;
+    background: white;
+    border-top: 2px solid var(--color-primary);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+    z-index: var(--z-modal);
+    overflow-y: auto;
+}
+
+.suggestion-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    background: white;
+}
+
+.suggestion-panel-header h3 {
+    margin: 0;
+    font-size: 14px;
+}
+
+.suggestion-panel-body {
+    padding: 0;
+    overflow-x: auto;
+}
+
+/* ========================================
+   TOOLBAR
+   ======================================== */
+
+.toolbar {
+    padding: 12px 16px;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-xs);
+}
+
+/* ========================================
+   FORM RANGE (SLIDER)
+   ======================================== */
+
+.form-range {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 6px;
+    background: var(--color-gray-200);
+    border-radius: 3px;
+    outline: none;
+}
+
+.form-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    cursor: pointer;
+}
+
+.form-range::-moz-range-thumb {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    cursor: pointer;
+    border: none;
+}
+
+/* ========================================
+   RIGHT-CLICK CONTEXT MENU
+   ======================================== */
+
+.row-context-menu {
+    position: fixed;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg, 0 4px 20px rgba(0, 0, 0, 0.15));
+    z-index: calc(var(--z-modal, 1000) + 10);
+    min-width: 200px;
+    padding: 4px 0;
+    font-size: 13px;
+}
+
+.context-menu-item {
+    padding: 8px 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: background var(--transition-fast, 0.1s);
+}
+
+.context-menu-item:hover {
+    background: var(--color-primary-light, #eff6ff);
+}
+
+.context-menu-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}
+
+/* ========================================
+   PREVIEW TABLE ROW HIGHLIGHTS
+   ======================================== */
+
+.preview-row-number {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-family: var(--font-family-mono, monospace);
+    text-align: right;
+    min-width: 32px;
+    user-select: none;
+    padding-right: 8px !important;
+    background: var(--color-gray-50) !important;
+    border-right: 1px solid var(--border-color) !important;
+}
+
+.row-header-row {
+    background-color: #dbeafe !important; /* blue-100 */
+    font-weight: 600;
+}
+
+.row-header-row td {
+    background-color: #dbeafe !important;
+}
+
+.row-header-row td.preview-row-number {
+    background-color: #bfdbfe !important; /* blue-200 */
+}
+
+.row-in-range {
+    /* default - no special styling needed */
+}
+
+.row-out-of-range {
+    opacity: 0.4;
+}
+
+.row-start td:first-child {
+    border-top: 2px solid #10b981;
+}
+
+.row-end td:first-child {
+    border-bottom: 2px solid #10b981;
+}
+
+/* ========================================
+   ROW RANGE CONTROLS
+   ======================================== */
+
+.row-range-section {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.row-range-input {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.row-range-input label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-main);
+    white-space: nowrap;
+}
+
+.row-range-input input {
+    width: 80px;
+    padding: 4px 8px;
+    font-size: 13px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+.row-range-apply {
+    padding: 4px 12px !important;
+    font-size: 12px !important;
+}

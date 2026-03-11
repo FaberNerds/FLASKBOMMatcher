@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block title %}BOM Matcher - Upload{% endblock %}
+
+{% block topbar_actions %}
+<a href="/settings" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">Settings</a>
+{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width: 900px; margin: 0 auto;">
+    <div class="card-header">
+        <h2 class="card-title">Upload BOM File</h2>
+        <p class="card-subtitle">Upload an Excel or CSV file, then map columns to proceed</p>
+    </div>
+    <div class="card-body">
+        <!-- Drop Zone -->
+        <div class="upload-zone" id="dropZone">
+            <div class="upload-zone-content">
+                <div style="font-size: 48px; margin-bottom: 12px;">📁</div>
+                <p style="font-size: 16px; font-weight: 600; margin: 0 0 4px;">Drop BOM file here or click to browse</p>
+                <p style="color: var(--text-muted); margin: 0;">Supports .xlsx, .xls, .csv</p>
+            </div>
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+        </div>
+
+        <!-- File Info (shown after upload) -->
+        <div id="fileInfo" style="display: none; margin-top: 20px;">
+            <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--color-success-light); border-radius: var(--radius-md);">
+                <span style="font-size: 20px;">✓</span>
+                <div>
+                    <strong id="fileName"></strong>
+                    <span id="fileRowCount" style="color: var(--text-muted); margin-left: 8px;"></span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sheet Selector -->
+        <div id="sheetSelector" style="display: none; margin-top: 16px;">
+            <label class="form-label">Sheet</label>
+            <select id="sheetSelect" class="form-select">
+            </select>
+        </div>
+
+        <!-- Header Row Slider -->
+        <div id="headerRowSection" style="display: none; margin-top: 16px;">
+            <label class="form-label">Header Row: <span id="headerRowValue">1</span></label>
+            <input type="range" id="headerRowSlider" min="0" max="20" value="0" class="form-range"
+                   style="width: 100%;">
+        </div>
+
+        <!-- Row Range Controls -->
+        <div id="rowRangeSection" style="display: none; margin-top: 16px;">
+            <label class="form-label">Data Row Range</label>
+            <div class="row-range-section">
+                <div class="row-range-input">
+                    <label>Start row:</label>
+                    <input type="number" id="startRowInput" min="1" class="form-input" placeholder="All">
+                </div>
+                <div class="row-range-input">
+                    <label>End row:</label>
+                    <input type="number" id="endRowInput" min="1" class="form-input" placeholder="All">
+                </div>
+                <button class="btn btn-outline row-range-apply" onclick="applyRowRange()">Apply</button>
+                <button class="btn btn-outline row-range-apply" onclick="clearRowRange()" style="color: var(--text-muted);">Clear</button>
+            </div>
+        </div>
+
+        <!-- Preview Table -->
+        <div id="previewSection" style="display: none; margin-top: 20px;">
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Preview (right-click rows to set header/range)</h3>
+            <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
+                <table class="data-table" id="previewTable">
+                    <thead id="previewHead"></thead>
+                    <tbody id="previewBody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Column Mapping -->
+        <div id="mappingSection" style="display: none; margin-top: 24px;">
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Column Mapping</h3>
+            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 16px;">
+                Map your BOM columns to standard fields. Description is required.
+            </p>
+            <div class="mapping-grid" id="mappingGrid">
+                <!-- Filled by JS -->
+            </div>
+        </div>
+
+        <!-- Process Button -->
+        <div id="processSection" style="display: none; margin-top: 24px; text-align: right;">
+            <button class="btn btn-primary btn-lg" id="processBtn" onclick="processBom()">
+                Process BOM &gt;&gt;
+            </button>
+        </div>
+    </div>
+</div>
+<!-- Right-click context menu -->
+<div id="rowContextMenu" class="row-context-menu" style="display: none;">
+    <div class="context-menu-item" onclick="setAsHeaderRow()">📋 Set as Header Row</div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" onclick="setAsStartRow()">📍 Set as Start Row</div>
+    <div class="context-menu-item" onclick="setAsEndRow()">🏁 Set as End Row</div>
+    <div class="context-menu-divider"></div>
+    <div class="context-menu-item" onclick="clearRowRangeMenu()">❌ Clear Selection</div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+{% endblock %}

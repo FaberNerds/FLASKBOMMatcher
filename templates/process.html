@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}BOM Matcher - Process{% endblock %}
+
+{% block topbar_actions %}
+<div style="display: flex; gap: 8px;">
+    <a href="/" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">&lt;&lt; Back</a>
+    <a href="/settings" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">Settings</a>
+</div>
+{% endblock %}
+
+{% block content %}
+<!-- Toolbar -->
+<div class="toolbar" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
+    <h2 style="margin: 0; font-size: 18px; flex: 1;">
+        BOM: <span id="bomName" style="color: var(--color-primary);"></span>
+        <span id="bomStats" style="color: var(--text-muted); font-size: 13px; margin-left: 8px;"></span>
+    </h2>
+    <button class="btn btn-primary" onclick="assessMpnfree()">Assign MPNfree?</button>
+    <button class="btn btn-primary" onclick="findIpn()">Find IPN</button>
+    <button class="btn btn-outline" onclick="exportBom()">Export</button>
+</div>
+
+<!-- Legend -->
+<div class="legend" style="display: flex; gap: 16px; margin-bottom: 12px; font-size: 12px;">
+    <span><span class="legend-dot legend-green"></span> Matched</span>
+    <span><span class="legend-dot legend-yellow"></span> Suggestion</span>
+    <span><span class="legend-dot legend-red"></span> No match</span>
+    <span><span class="legend-dot legend-gray"></span> MPNfree</span>
+</div>
+
+<!-- Main BOM Table -->
+<div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: white;">
+    <table class="data-table" id="bomTable">
+        <thead id="bomTableHead"></thead>
+        <tbody id="bomTableBody"></tbody>
+    </table>
+</div>
+
+<!-- Suggestion Panel (floating) -->
+<div class="suggestion-panel" id="suggestionPanel" style="display: none;">
+    <div class="suggestion-panel-header">
+        <h3>Suggestions for row <span id="suggestionRowIdx"></span></h3>
+        <button class="btn btn-outline btn-sm" onclick="closeSuggestionPanel()">Close</button>
+    </div>
+    <div class="suggestion-panel-body">
+        <table class="data-table" id="suggestionTable">
+            <thead>
+                <tr>
+                    <th>FaberNr</th>
+                    <th>Description</th>
+                    <th>Manufacturer</th>
+                    <th>MPN</th>
+                    <th>Status</th>
+                    <th>Stock</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody id="suggestionBody"></tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/process.js') }}"></script>
+{% endblock %}
