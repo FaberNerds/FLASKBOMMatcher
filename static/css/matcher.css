@@ -50,6 +50,84 @@
     flex: 1;
 }
 
+/* Multi-select mapping dropdown */
+.mapping-multiselect {
+    flex: 1;
+    position: relative;
+}
+
+.mapping-multiselect-display {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: white;
+    cursor: pointer;
+    font-size: 13px;
+    min-height: 34px;
+    transition: border-color var(--transition-fast);
+}
+
+.mapping-multiselect-display:hover {
+    border-color: var(--color-primary);
+}
+
+.mapping-multiselect-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.mapping-multiselect-arrow {
+    color: var(--text-muted);
+    margin-left: 8px;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.mapping-multiselect-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background: white;
+    border: 1px solid var(--border-color);
+    border-top: none;
+    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    z-index: 50;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.mapping-checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background var(--transition-fast);
+}
+
+.mapping-checkbox-item:hover {
+    background: var(--color-primary-light, #eff6ff);
+}
+
+.mapping-checkbox-item input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+}
+
+.mapping-checkbox-item span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 /* ========================================
    CUSTOMER SELECTOR
    ======================================== */
@@ -111,9 +189,14 @@
     background-color: #f3f4f6 !important; /* gray-100 */
 }
 
+.row-deleted {
+    background-color: #fca5a5 !important; /* red-300 */
+}
+
 .row-matched:hover,
 .row-suggestion:hover,
 .row-nomatch:hover,
+.row-deleted:hover,
 .row-mpnfree:hover {
     filter: brightness(0.97);
 }
@@ -427,6 +510,8 @@
 .split-panel .data-table {
     font-size: 12px;
     border: none;
+    border-collapse: collapse;
+    border-spacing: 0;
 }
 
 .split-panel .data-table th,
@@ -471,6 +556,125 @@
 
 .split-panel .data-table tr {
     cursor: pointer;
+}
+
+/* ========================================
+   PARAMS PANEL (in split panel)
+   ======================================== */
+
+.split-panel-params {
+    width: 160px;
+    min-width: 160px;
+    max-width: 160px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+}
+
+.params-stats {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 4px;
+}
+
+.params-table {
+    border-collapse: collapse;
+    border-spacing: 0;
+    width: 100%;
+}
+
+.params-table th,
+.params-table td {
+    text-align: center;
+    min-width: 28px;
+    max-width: 35px;
+    padding: 6px 4px;
+    box-sizing: border-box;
+    border: none;
+    font-size: 11px;
+}
+
+.params-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--color-gray-50);
+    padding: 6px 8px;
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.params-table tr {
+    cursor: pointer;
+}
+
+.params-table tr.row-selected {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+}
+
+/* Parameter indicator pills */
+.param-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    border-radius: 9px;
+    cursor: pointer;
+    font-size: 8px;
+    font-weight: bold;
+    color: white;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+    white-space: nowrap;
+}
+
+.param-match {
+    background-color: var(--color-success, #10b981);
+}
+
+.param-diff {
+    background-color: var(--color-danger, #ef4444);
+}
+
+.param-missing {
+    background-color: var(--color-gray-300, #d1d5db);
+}
+
+.param-na {
+    background-color: transparent;
+    border: 2px dashed var(--color-gray-300, #d1d5db);
+    color: var(--color-gray-400, #9ca3af);
+    text-shadow: none;
+}
+
+.param-acceptable {
+    background-color: #fbbf24;
+    color: #78350f;
+}
+
+/* Instant tooltip for param indicators */
+#paramIndicatorTooltip {
+    position: fixed;
+    background: #1e293b;
+    color: white;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: normal;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10000;
+    opacity: 0;
+    transition: opacity 0.1s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+#paramIndicatorTooltip.visible {
+    opacity: 1;
 }
 
 /* ========================================

@@ -19,6 +19,7 @@
     <button class="btn btn-outline" onclick="selectMpnfree()">Select MPNfree</button>
     <button class="btn btn-primary" onclick="findIpn()">Find IPN</button>
     <button class="btn btn-primary" id="manualSearchBtn" onclick="toggleManualSearch()">Manual search: ON</button>
+    <button class="btn btn-outline" id="deleteModeBtn" onclick="toggleDeleteMode()">Delete: OFF</button>
     <button class="btn btn-outline" onclick="exportBom()">Export</button>
 </div>
 
@@ -84,10 +85,33 @@
             </table>
         </div>
     </div>
+
+    <!-- Divider -->
+    <div class="split-panel-divider"></div>
+
+    <!-- Params Panel -->
+    <div class="split-panel-params" id="paramsPanel">
+        <div class="split-panel-header">Params <span class="params-stats" id="paramsStats">0</span></div>
+        <div class="split-panel-scroll" id="paramsScroll">
+            <table class="params-table" id="paramsTable">
+                <thead>
+                    <tr>
+                        <th title="Value">Ω/-||-</th>
+                        <th title="Tolerance">%</th>
+                        <th title="Voltage">V</th>
+                        <th title="Power">P</th>
+                        <th title="Package">📦</th>
+                    </tr>
+                </thead>
+                <tbody id="paramsTableBody"></tbody>
+            </table>
+        </div>
+    </div>
 </div>
 
 {% endblock %}
 
 {% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/process-params.js') }}"></script>
 <script src="{{ url_for('static', filename='js/process.js') }}"></script>
 {% endblock %}

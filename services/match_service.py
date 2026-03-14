@@ -19,6 +19,22 @@ from services.klant_cache_service import find_klant_nr_by_name
 
 logger = logging.getLogger(__name__)
 
+
+def _get_mapped_value(row: Dict, column_mapping: Dict[str, Any], field: str) -> str:
+    """Extract a value from a row using the column mapping.
+
+    Supports both single column (string) and multi-column (list) mappings.
+    For multi-column mappings, values are concatenated with a space.
+    """
+    col = column_mapping.get(field, '')
+    if not col:
+        return ''
+    if isinstance(col, list):
+        parts = [row.get(c, '').strip() for c in col if row.get(c, '').strip()]
+        return ' '.join(parts)
+    return row.get(col, '').strip()
+
+
 # KlantNr for ICP Systems B.V. — resolved lazily on first use
 _icp_klant_nr: Optional[str] = None
 
@@ -252,7 +268,7 @@ def _search_row_by_parameters(row_index: int, description: str, category: str, s
 
 def find_ipn_batch(
     bom_rows: List[Dict],
-    column_mapping: Dict[str, str],
+    column_mapping: Dict[str, Any],
     mpnfree_flags: Optional[Dict[str, bool]] = None,
     selected_klant_nr: str = "",
 ) -> List[Dict[str, Any]]:
@@ -275,13 +291,8 @@ def find_ipn_batch(
     # Clear search cache for fresh batch results
     search_service.clear_search_cache()
 
-    mpn_col = column_mapping.get('MPN', '')
-    desc_col = column_mapping.get('Description', '')
-    ipn_col = column_mapping.get('FaberNr', '')
-    mfr_col = column_mapping.get('Manufacturer', '')
-
     mpnfree_count = sum(1 for v in mpnfree_flags.values() if v)
-    logger.info(f"Column mapping: MPN='{mpn_col}', Desc='{desc_col}', IPN='{ipn_col}', Mfr='{mfr_col}'")
+    logger.info(f"Column mapping: {column_mapping}")
     logger.info(f"MPNfree rows: {mpnfree_count}")
 
     # Phase 1: Categorize rows
@@ -291,10 +302,10 @@ def find_ipn_batch(
     desc_rows = []      # (row_index, description) — need AI search terms
 
     for i, row in enumerate(bom_rows):
-        mpn = row.get(mpn_col, '').strip() if mpn_col else ''
-        ipn = row.get(ipn_col, '').strip() if ipn_col else ''
-        desc = row.get(desc_col, '').strip() if desc_col else ''
-        mfr = row.get(mfr_col, '').strip() if mfr_col else ''
+        mpn = _get_mapped_value(row, column_mapping, 'MPN')
+        ipn = _get_mapped_value(row, column_mapping, 'FaberNr')
+        desc = _get_mapped_value(row, column_mapping, 'Description')
+        mfr = _get_mapped_value(row, column_mapping, 'Manufacturer')
         is_mpnfree = mpnfree_flags.get(str(i), False)
 
         # MPNfree rows: parameterized search by description (skip MPN matching)
@@ -372,7 +383,7 @@ def find_ipn_batch(
 
                     if search_type == 'param' and result is None:
                         # Parameterized search returned None → fallback to description search
-                        desc = bom_rows[row_idx].get(desc_col, '').strip() if desc_col else ''
+                        desc = _get_mapped_value(bom_rows[row_idx], column_mapping, 'Description')
                         if desc:
                             words = desc.split()[:4]
                             if words:
@@ -422,20 +433,15 @@ def find_ipn_batch(
 def find_ipn_single(
     row_index: int,
     row: Dict,
-    column_mapping: Dict[str, str],
+    column_mapping: Dict[str, Any],
     is_mpnfree: bool = False,
     selected_klant_nr: str = "",
 ) -> Dict[str, Any]:
     """Re-search a single row."""
-    mpn_col = column_mapping.get('MPN', '')
-    desc_col = column_mapping.get('Description', '')
-    ipn_col = column_mapping.get('FaberNr', '')
-    mfr_col = column_mapping.get('Manufacturer', '')
-
-    mpn = row.get(mpn_col, '').strip() if mpn_col else ''
-    ipn = row.get(ipn_col, '').strip() if ipn_col else ''
-    desc = row.get(desc_col, '').strip() if desc_col else ''
-    mfr = row.get(mfr_col, '').strip() if mfr_col else ''
+    mpn = _get_mapped_value(row, column_mapping, 'MPN')
+    ipn = _get_mapped_value(row, column_mapping, 'FaberNr')
+    desc = _get_mapped_value(row, column_mapping, 'Description')
+    mfr = _get_mapped_value(row, column_mapping, 'Manufacturer')
 
     logger.info(f"Re-search row {row_index}: MPN='{mpn}', IPN='{ipn}', mpnfree={is_mpnfree}")
 

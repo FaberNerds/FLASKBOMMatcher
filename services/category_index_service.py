@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
 from services.db_service import get_connection_context
+from services.package_alias_service import resolve_package_alias
 
 logger = logging.getLogger(__name__)
 
@@ -229,6 +230,10 @@ def _parse_voltage(desc: str) -> Optional[str]:
 
 def _parse_package_from_desc(desc: str) -> Optional[str]:
     """Extract a standard package footprint from a description string."""
+    # Check user-defined package aliases first
+    alias = resolve_package_alias(desc)
+    if alias:
+        return alias
     # Metric footprints: 0402, 0603, 0805, 1206, 1210, 2512, etc.
     m = re.search(r'\b(0201|0402|0603|0805|1206|1210|1812|2010|2512)\b', desc)
     if m:

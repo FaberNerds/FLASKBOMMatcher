@@ -16,6 +16,7 @@ from services.category_index_service import (
     normalize_inductance,
     normalize_package,
 )
+from services.package_alias_service import resolve_package_alias
 
 
 logger = logging.getLogger(__name__)
@@ -41,6 +42,9 @@ def _find_tolerance(text: str) -> str | None:
 
 
 def _find_smd_package(text: str) -> str | None:
+    alias = resolve_package_alias(text)
+    if alias:
+        return normalize_package(alias)
     m = re.search(_SMD_PACKAGES, text)
     if m:
         return normalize_package(m.group(1))

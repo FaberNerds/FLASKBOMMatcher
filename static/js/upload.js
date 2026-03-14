@@ -97,15 +97,66 @@ async function uploadFile(file) {
         if (rowRangeSection) rowRangeSection.style.display = 'block';
         clearRowRangeInputs();
 
-        renderPreview();
-        renderMapping();
+        // Check if we have previous settings to restore
+        const prev = data.previous_settings;
+        if (prev && prev.header_row != null && prev.header_row !== 0) {
+            // Restore header row, sheet, and row range before rendering
+            selectedHeaderRow = prev.header_row;
+            if (prev.sheet_name) {
+                const sheetSelect = document.getElementById('sheetSelect');
+                if (sheetSelect) sheetSelect.value = prev.sheet_name;
+            }
+            rowRange = {
+                start: prev.start_row != null ? prev.start_row : null,
+                end: prev.end_row != null ? prev.end_row : null,
+            };
+            updateRowRangeInputs();
+
+            // Reload with restored header/sheet/range, then apply mapping
+            await reloadFile();
+            renderMapping();
+            if (prev.column_mapping) applyStoredMapping(prev.column_mapping);
+        } else if (prev) {
+            // Header row is 0 (default) - restore sheet and range
+            if (prev.sheet_name) {
+                const sheetSelect = document.getElementById('sheetSelect');
+                if (sheetSelect) sheetSelect.value = prev.sheet_name;
+            }
+            rowRange = {
+                start: prev.start_row != null ? prev.start_row : null,
+                end: prev.end_row != null ? prev.end_row : null,
+            };
+            updateRowRangeInputs();
+
+            // Reload if sheet or range changed from defaults
+            if (prev.sheet_name || prev.start_row != null || prev.end_row != null) {
+                await reloadFile();
+            } else {
+                renderPreview();
+            }
+            renderMapping();
+            if (prev.column_mapping) applyStoredMapping(prev.column_mapping);
+        } else {
+            renderPreview();
+            renderMapping();
+        }
+
         document.getElementById('previewSection').style.display = 'block';
         document.getElementById('mappingSection').style.display = 'block';
         const customerSection = document.getElementById('customerSection');
         if (customerSection) customerSection.style.display = 'block';
         document.getElementById('processSection').style.display = 'block';
 
-        toast.success(`Uploaded ${data.filename}`);
+        // Restore customer selection if previous settings exist
+        if (prev && prev.klant_nr) {
+            await restoreCustomer(prev.klant_nr);
+        }
+
+        if (prev) {
+            toast.success(`Restored previous settings for ${data.filename}`);
+        } else {
+            toast.success(`Uploaded ${data.filename}`);
+        }
     } catch (error) {
         toast.error(error.message);
     } finally {
@@ -369,22 +420,79 @@ function renderMapping() {
     const grid = document.getElementById('mappingGrid');
 
     grid.innerHTML = standardColumns.map(stdCol => {
-        const options = currentHeaders.map(h =>
-            `<option value="${escapeHtml(h)}"${autoMatch(stdCol, h) ? ' selected' : ''}>${escapeHtml(h)}</option>`
-        ).join('');
-
         const required = stdCol === 'Description' ? ' *' : '';
+
+        // Build the multi-select dropdown
+        const checkboxes = currentHeaders.map(h => {
+            const checked = autoMatch(stdCol, h) ? ' checked' : '';
+            return `<label class="mapping-checkbox-item">
+                <input type="checkbox" value="${escapeHtml(h)}"${checked}>
+                <span>${escapeHtml(h)}</span>
+            </label>`;
+        }).join('');
 
         return `
             <div class="mapping-row">
                 <label class="mapping-label">${escapeHtml(stdCol)}${required}</label>
-                <select class="form-select mapping-select" data-standard="${escapeHtml(stdCol)}">
-                    <option value="">-- not mapped --</option>
-                    ${options}
-                </select>
+                <div class="mapping-multiselect" data-standard="${escapeHtml(stdCol)}">
+                    <div class="mapping-multiselect-display" onclick="toggleMappingDropdown(this)">
+                        <span class="mapping-multiselect-text">-- not mapped --</span>
+                        <span class="mapping-multiselect-arrow">&#9662;</span>
+                    </div>
+                    <div class="mapping-multiselect-dropdown" style="display: none;">
+                        ${checkboxes}
+                    </div>
+                </div>
             </div>
         `;
     }).join('');
+
+    // Update display text for auto-matched selections
+    document.querySelectorAll('.mapping-multiselect').forEach(ms => {
+        updateMappingDisplay(ms);
+    });
+
+    // Add change listeners to checkboxes
+    document.querySelectorAll('.mapping-multiselect input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+            updateMappingDisplay(cb.closest('.mapping-multiselect'));
+        });
+    });
+}
+
+function toggleMappingDropdown(displayEl) {
+    const dropdown = displayEl.nextElementSibling;
+    const isOpen = dropdown.style.display !== 'none';
+
+    // Close all other dropdowns first
+    document.querySelectorAll('.mapping-multiselect-dropdown').forEach(d => {
+        d.style.display = 'none';
+    });
+
+    if (!isOpen) {
+        dropdown.style.display = 'block';
+        // Close on outside click
+        const closeHandler = (e) => {
+            if (!dropdown.contains(e.target) && !displayEl.contains(e.target)) {
+                dropdown.style.display = 'none';
+                document.removeEventListener('mousedown', closeHandler);
+            }
+        };
+        setTimeout(() => document.addEventListener('mousedown', closeHandler), 0);
+    }
+}
+
+function updateMappingDisplay(multiselect) {
+    const checked = multiselect.querySelectorAll('input[type="checkbox"]:checked');
+    const textEl = multiselect.querySelector('.mapping-multiselect-text');
+    if (checked.length === 0) {
+        textEl.textContent = '-- not mapped --';
+        textEl.style.color = 'var(--text-muted)';
+    } else {
+        const names = Array.from(checked).map(cb => cb.value);
+        textEl.textContent = names.join(' + ');
+        textEl.style.color = 'var(--text-main)';
+    }
 }
 
 function autoMatch(standardCol, headerCol) {
@@ -401,6 +509,37 @@ function autoMatch(standardCol, headerCol) {
 
     const aliasList = aliases[std] || [std];
     return aliasList.some(a => hdr.includes(a));
+}
+
+// ========================================================================
+// Restore Previously Stored Settings
+// ========================================================================
+
+function applyStoredMapping(mapping) {
+    document.querySelectorAll('.mapping-multiselect').forEach(ms => {
+        const stdCol = ms.dataset.standard;
+        const stored = mapping[stdCol];
+        if (!stored) return;
+
+        // Normalize to array
+        const values = Array.isArray(stored) ? stored : [stored];
+
+        // Uncheck all, then check matching
+        ms.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+            cb.checked = values.includes(cb.value);
+        });
+        updateMappingDisplay(ms);
+    });
+}
+
+async function restoreCustomer(klantNr) {
+    if (!klantNr) return;
+    // Ensure customer list is loaded before trying to restore
+    await klantenReady;
+    const klant = allKlanten.find(k => k.klant_nr === klantNr);
+    if (klant) {
+        selectCustomer(klant.klant_nr, klant.klant_naam);
+    }
 }
 
 // ========================================================================
@@ -489,20 +628,23 @@ function clearCustomerSelection() {
 }
 
 // Load customer list on page load
-loadKlanten().then(() => initCustomerSelector());
+const klantenReady = loadKlanten().then(() => initCustomerSelector());
 
 // ========================================================================
 // Process BOM
 // ========================================================================
 
 async function processBom() {
-    // Collect mapping
+    // Collect mapping (supports multiple columns per standard field)
     const mapping = {};
-    document.querySelectorAll('.mapping-select').forEach(select => {
-        const stdCol = select.dataset.standard;
-        const value = select.value;
-        if (value) {
-            mapping[stdCol] = value;
+    document.querySelectorAll('.mapping-multiselect').forEach(ms => {
+        const stdCol = ms.dataset.standard;
+        const checked = ms.querySelectorAll('input[type="checkbox"]:checked');
+        const values = Array.from(checked).map(cb => cb.value);
+        if (values.length === 1) {
+            mapping[stdCol] = values[0];  // single value: keep as string for backwards compat
+        } else if (values.length > 1) {
+            mapping[stdCol] = values;     // multiple values: send as array
         }
     });
 

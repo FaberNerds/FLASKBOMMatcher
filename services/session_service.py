@@ -5,9 +5,12 @@ Handles Flask session management and BOM data storage for single-BOM flow.
 import uuid
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from flask import session
 import config
+
+MAPPING_HISTORY_PATH = config.UPLOAD_FOLDER / 'mapping_history.json'
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +127,42 @@ def get_session_data() -> dict:
         'bom_loaded': session.get('bom_loaded', False),
         'bom_name': session.get('bom_name'),
     }
+
+
+def save_mapping_history(filename: str, settings: dict) -> None:
+    """Persist column mapping and settings for a filename so they can be restored on re-upload."""
+    history = {}
+    if MAPPING_HISTORY_PATH.exists():
+        try:
+            with open(MAPPING_HISTORY_PATH, 'r') as f:
+                history = json.load(f)
+        except Exception:
+            history = {}
+
+    history[filename] = {
+        'column_mapping': settings.get('column_mapping', {}),
+        'klant_nr': settings.get('klant_nr', ''),
+        'header_row': settings.get('header_row', 0),
+        'sheet_name': settings.get('sheet_name'),
+        'start_row': settings.get('start_row'),
+        'end_row': settings.get('end_row'),
+        'saved_at': datetime.now().isoformat(),
+    }
+
+    with open(MAPPING_HISTORY_PATH, 'w') as f:
+        json.dump(history, f)
+
+
+def load_mapping_history(filename: str) -> dict | None:
+    """Load previously stored settings for a filename, or None if not found."""
+    if not MAPPING_HISTORY_PATH.exists():
+        return None
+    try:
+        with open(MAPPING_HISTORY_PATH, 'r') as f:
+            history = json.load(f)
+        return history.get(filename)
+    except Exception:
+        return None
 
 
 def clear_session_data() -> None:

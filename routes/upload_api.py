@@ -10,7 +10,8 @@ from werkzeug.utils import secure_filename
 import config
 from services.file_service import allowed_file, read_file, get_sheet_names, get_file_preview
 from services.session_service import (
-    get_session_id, save_bom_data, load_bom_data
+    get_session_id, save_bom_data, load_bom_data,
+    save_mapping_history, load_mapping_history
 )
 from services.klant_cache_service import get_all_klanten
 
@@ -57,14 +58,21 @@ def upload_file():
             'column_mapping': {}
         })
 
-        return jsonify({
+        # Check for previously stored settings for this filename
+        previous_settings = load_mapping_history(filename)
+
+        result = {
             'success': True,
             'filename': filename,
             'headers': headers,
             'preview_rows': rows[:50],
             'total_rows': len(rows),
             'sheets': sheets
-        })
+        }
+        if previous_settings:
+            result['previous_settings'] = previous_settings
+
+        return jsonify(result)
 
     except Exception as e:
         logger.error(f"Error reading uploaded file: {e}")
@@ -148,6 +156,16 @@ def set_mapping():
     bom_data['column_mapping'] = mapping
     bom_data['klant_nr'] = klant_nr
     save_bom_data(bom_data)
+
+    # Persist settings for future re-uploads of the same file
+    save_mapping_history(bom_data.get('name', ''), {
+        'column_mapping': mapping,
+        'klant_nr': klant_nr,
+        'header_row': bom_data.get('header_row', 0),
+        'sheet_name': bom_data.get('sheet_name'),
+        'start_row': bom_data.get('start_row'),
+        'end_row': bom_data.get('end_row'),
+    })
 
     return jsonify({'success': True})
 

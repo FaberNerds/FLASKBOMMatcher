@@ -11,11 +11,25 @@ let selections = {};
 let selectedRow = null;
 let activeModal = null;
 let manualSearchMode = true;
+let deleteMode = false;
+let deletedRows = new Set();
 let modalSortColumn = null;
 let modalSortAsc = true;
 let modalSuggestions = [];
 let modalRowIndex = null;
 let descColumnWidth = null;
+
+/**
+ * Get a mapped value from a row, supporting multi-column mappings.
+ * When mapping is an array of column names, values are joined with a space.
+ */
+function getMappedValue(row, mappingValue) {
+    if (!mappingValue) return '';
+    if (Array.isArray(mappingValue)) {
+        return mappingValue.map(c => String(row[c] || '').trim()).filter(v => v).join(' ');
+    }
+    return String(row[mappingValue] || '');
+}
 
 // Column order for left table (customer BOM)
 const leftColumns = ['Description', 'MPN', 'Manufacturer', 'Quantity', 'Refdes'];
@@ -48,21 +62,24 @@ async function loadBomData() {
 function setupSyncScroll() {
     const leftScroll = document.getElementById('leftScroll');
     const rightScroll = document.getElementById('rightScroll');
+    const paramsScroll = document.getElementById('paramsScroll');
     let syncing = false;
 
-    leftScroll.addEventListener('scroll', () => {
+    function syncAll(source) {
         if (syncing) return;
         syncing = true;
-        rightScroll.scrollTop = leftScroll.scrollTop;
+        const top = source.scrollTop;
+        if (source !== leftScroll) leftScroll.scrollTop = top;
+        if (source !== rightScroll) rightScroll.scrollTop = top;
+        if (paramsScroll && source !== paramsScroll) paramsScroll.scrollTop = top;
         syncing = false;
-    });
+    }
 
-    rightScroll.addEventListener('scroll', () => {
-        if (syncing) return;
-        syncing = true;
-        leftScroll.scrollTop = rightScroll.scrollTop;
-        syncing = false;
-    });
+    leftScroll.addEventListener('scroll', () => syncAll(leftScroll));
+    rightScroll.addEventListener('scroll', () => syncAll(rightScroll));
+    if (paramsScroll) {
+        paramsScroll.addEventListener('scroll', () => syncAll(paramsScroll));
+    }
 }
 
 // ========================================================================
@@ -133,7 +150,9 @@ function renderTables() {
 
         // Row class for color coding
         let rowClass = '';
-        if (confidence === 'high') {
+        if (deletedRows.has(i)) {
+            rowClass = 'row-deleted';
+        } else if (confidence === 'high') {
             rowClass = 'row-matched';
             matchedCount++;
         } else if (confidence === 'medium' || confidence === 'low') {
@@ -152,7 +171,7 @@ function renderTables() {
         leftHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="selectRow(${i})">`;
         leftHtml += `<td style="color: var(--text-muted); font-size: 11px;">${i + 1}</td>`;
         for (const col of mappedCols) {
-            const cellValue = row[col.actual] || '';
+            const cellValue = getMappedValue(row, col.actual);
             // Highlight BOM description for MPNfree rows with parameterized match results
             if (col.std === 'Description' && hasMpnfree && getMpnfreeValue(i) && match && match.auto_selected && match.auto_selected._bom_highlights && match.auto_selected._bom_highlights.length > 0) {
                 leftHtml += `<td class="desc-col" title="${escapeHtml(cellValue)}">${applyHighlights(cellValue, match.auto_selected._bom_highlights)}</td>`;
@@ -166,7 +185,7 @@ function renderTables() {
         leftHtml += '</tr>';
 
         // --- Right row ---
-        rightHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="selectRow(${i})">`;
+        rightHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="onRightRowClick(${i})">`;
 
         // Determine which item to display: manually selected suggestion or auto_selected
         let displayItem = null;
@@ -211,6 +230,11 @@ function renderTables() {
     // Sync row heights between left and right tables
     syncRowHeights();
 
+    // Populate params comparison table
+    if (typeof populateMatcherParamsTable === 'function') {
+        populateMatcherParamsTable();
+    }
+
     // Setup column resize handles
     setupColumnResize();
 
@@ -253,30 +277,38 @@ function applyDescColumnWidth(w) {
 function syncRowHeights() {
     const leftRows = document.querySelectorAll('#leftTableBody tr');
     const rightRows = document.querySelectorAll('#rightTableBody tr');
+    const paramsRows = document.querySelectorAll('#paramsTableBody tr');
     const count = Math.min(leftRows.length, rightRows.length);
 
     // Reset heights so natural heights can be measured
     for (let i = 0; i < count; i++) {
         leftRows[i].style.height = '';
         rightRows[i].style.height = '';
+        if (paramsRows[i]) paramsRows[i].style.height = '';
     }
 
-    // Set each pair to the max of the two
+    // Set each trio to the max of the three
     for (let i = 0; i < count; i++) {
-        const maxH = Math.max(leftRows[i].offsetHeight, rightRows[i].offsetHeight);
+        let maxH = Math.max(leftRows[i].offsetHeight, rightRows[i].offsetHeight);
+        if (paramsRows[i]) maxH = Math.max(maxH, paramsRows[i].offsetHeight);
         leftRows[i].style.height = maxH + 'px';
         rightRows[i].style.height = maxH + 'px';
+        if (paramsRows[i]) paramsRows[i].style.height = maxH + 'px';
     }
 
     // Also sync header rows
     const leftHeadRows = document.querySelectorAll('#leftTableHead tr');
     const rightHeadRows = document.querySelectorAll('#rightTableHead tr');
+    const paramsHeadRows = document.querySelectorAll('#paramsTable thead tr');
     if (leftHeadRows.length > 0 && rightHeadRows.length > 0) {
         leftHeadRows[0].style.height = '';
         rightHeadRows[0].style.height = '';
-        const maxHeaderH = Math.max(leftHeadRows[0].offsetHeight, rightHeadRows[0].offsetHeight);
+        if (paramsHeadRows[0]) paramsHeadRows[0].style.height = '';
+        let maxHeaderH = Math.max(leftHeadRows[0].offsetHeight, rightHeadRows[0].offsetHeight);
+        if (paramsHeadRows[0]) maxHeaderH = Math.max(maxHeaderH, paramsHeadRows[0].offsetHeight);
         leftHeadRows[0].style.height = maxHeaderH + 'px';
         rightHeadRows[0].style.height = maxHeaderH + 'px';
+        if (paramsHeadRows[0]) paramsHeadRows[0].style.height = maxHeaderH + 'px';
     }
 }
 
@@ -425,8 +457,7 @@ function renderHighlightedDescription(suggestion, match) {
 }
 
 function renderMpnHighlights(suggestion, match, customerRow, mapping) {
-    const mpnCol = mapping.MPN || '';
-    const customerMpn = customerRow[mpnCol] || '';
+    const customerMpn = getMappedValue(customerRow, mapping.MPN);
     const erpMpn = suggestion.MPN || '';
 
     if (!erpMpn) return '';
@@ -517,6 +548,41 @@ function toggleManualSearch() {
     }
 }
 
+function toggleDeleteMode() {
+    deleteMode = !deleteMode;
+    const btn = document.getElementById('deleteModeBtn');
+    if (btn) {
+        btn.textContent = deleteMode ? 'Delete: ON' : 'Delete: OFF';
+        btn.className = deleteMode ? 'btn btn-danger' : 'btn btn-outline';
+    }
+}
+
+function onRightRowClick(rowIndex) {
+    if (deleteMode) {
+        deleteMatch(rowIndex);
+    } else {
+        selectRow(rowIndex);
+    }
+}
+
+async function deleteMatch(rowIndex) {
+    const strIdx = String(rowIndex);
+    delete matchResults[strIdx];
+    delete selections[strIdx];
+    deletedRows.add(rowIndex);
+
+    try {
+        await apiCall('/api/match/delete', {
+            method: 'POST',
+            body: JSON.stringify({ row_index: rowIndex })
+        });
+        toast.success(`Match removed for row ${rowIndex + 1}`);
+    } catch (e) {
+        // toast shown by apiCall
+    }
+    renderTables();
+}
+
 function selectRow(rowIndex) {
     selectedRow = rowIndex;
     renderTables();
@@ -566,14 +632,15 @@ function showRowDetailModal(rowIndex) {
 
     let leftHtml = '';
     for (const col of mappedCols) {
-        const val = row[col.actual] || '';
+        const val = getMappedValue(row, col.actual);
         const isClickable = col.std === 'Description' || col.std === 'MPN';
+        const extraClass = isClickable ? ' left-field-clickable' : '';
         const clickAttr = isClickable
-            ? ` style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;" title="Click to copy to search box" onclick="document.getElementById('modalSearchQuery').value=this.textContent; document.getElementById('modalSearchType').value='${col.std === 'MPN' ? 'mpn' : 'description'}'"`
+            ? ` data-field-type="${col.std === 'MPN' ? 'mpn' : 'description'}" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;" title="Click to copy to search box${col.std === 'MPN' ? ' | Ctrl+click: Google | Alt+click: DigiKey' : ''}"`
             : '';
         leftHtml += `<div class="row-detail-field">
             <div class="row-detail-field-label">${escapeHtml(col.std)}</div>
-            <div class="row-detail-field-value"${clickAttr}>${escapeHtml(val)}</div>
+            <div class="row-detail-field-value${extraClass}"${clickAttr}>${escapeHtml(val)}</div>
         </div>`;
     }
 
@@ -661,6 +728,23 @@ function showRowDetailModal(rowIndex) {
                 window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
             } else {
                 navigator.clipboard.writeText(mpn).catch(() => {});
+            }
+        }
+        // Left panel field click handler
+        if (e.target.classList.contains('left-field-clickable')) {
+            const val = e.target.textContent.trim();
+            if (!val) return;
+            const fieldType = e.target.dataset.fieldType;
+
+            if (fieldType === 'mpn' && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                window.open(`https://www.google.com/search?q=${encodeURIComponent(val)}`, '_blank', 'noopener,noreferrer');
+            } else if (fieldType === 'mpn' && e.altKey) {
+                e.preventDefault();
+                window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(val)}`, '_blank', 'noopener,noreferrer');
+            } else {
+                document.getElementById('modalSearchQuery').value = val;
+                document.getElementById('modalSearchType').value = fieldType;
             }
         }
     });
@@ -864,6 +948,7 @@ function filterTable() {
 
     const leftRows = document.querySelectorAll('#leftTableBody tr');
     const rightRows = document.querySelectorAll('#rightTableBody tr');
+    const paramsRows = document.querySelectorAll('#paramsTableBody tr');
 
     for (let i = 0; i < leftRows.length; i++) {
         const leftRow = leftRows[i];
@@ -890,6 +975,7 @@ function filterTable() {
 
         leftRow.style.display = show ? '' : 'none';
         rightRow.style.display = show ? '' : 'none';
+        if (paramsRows[i]) paramsRows[i].style.display = show ? '' : 'none';
     }
 }
 

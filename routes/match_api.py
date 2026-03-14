@@ -189,17 +189,15 @@ def assess_mpnfree():
         return jsonify({'error': 'BOM has no rows'}), 400
 
     try:
-        mpn_col = mapping.get('MPN', '')
-        mfr_col = mapping.get('Manufacturer', '')
-        desc_col = mapping.get('Description', '')
+        from services.match_service import _get_mapped_value
 
         input_rows = []
         for i, row in enumerate(rows):
             input_rows.append({
                 'index': i,
-                'mpn': row.get(mpn_col, '') if mpn_col else '',
-                'manufacturer': row.get(mfr_col, '') if mfr_col else '',
-                'description': row.get(desc_col, '') if desc_col else ''
+                'mpn': _get_mapped_value(row, mapping, 'MPN'),
+                'manufacturer': _get_mapped_value(row, mapping, 'Manufacturer'),
+                'description': _get_mapped_value(row, mapping, 'Description')
             })
 
         results = assess_mpnfree_batch_local(input_rows)
@@ -220,6 +218,29 @@ def assess_mpnfree():
     except Exception as e:
         logger.error(f"assess_mpnfree error: {e}")
         return jsonify({'error': f'MPNfree assessment failed: {str(e)}'}), 500
+
+
+@match_bp.route('/match/delete', methods=['POST'])
+def delete_match():
+    """Delete match and selection for a row."""
+    data = request.get_json()
+    row_index = data.get('row_index')
+    if row_index is None:
+        return jsonify({'error': 'row_index required'}), 400
+
+    str_idx = str(row_index)
+
+    matches = load_matches() or {}
+    if str_idx in matches:
+        del matches[str_idx]
+        save_matches(matches)
+
+    sels = load_selections() or {}
+    if str_idx in sels:
+        del sels[str_idx]
+        save_selections(sels)
+
+    return jsonify({'success': True})
 
 
 @match_bp.route('/match/override', methods=['POST'])

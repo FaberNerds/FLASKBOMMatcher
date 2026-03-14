@@ -44,6 +44,37 @@
             <span id="rebuildResult" style="margin-left: 12px; font-size: 13px;"></span>
         </div>
     </div>
+
+    <!-- Package Aliases -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">Package Aliases</h3>
+            <p class="card-subtitle">Map custom text patterns to standard package sizes (e.g. UNIFIED-C0603 &rarr; 0603)</p>
+        </div>
+        <div class="card-body">
+            <div id="aliasesTable" style="margin-bottom: 12px;"></div>
+            <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <input type="text" id="aliasPattern" placeholder="Pattern (e.g. UNIFIED-C0603)"
+                       style="flex: 1; min-width: 180px; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);">
+                <select id="aliasPackage"
+                        style="padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);">
+                    <option value="01005">01005</option>
+                    <option value="0201">0201</option>
+                    <option value="0402">0402</option>
+                    <option value="0603" selected>0603</option>
+                    <option value="0805">0805</option>
+                    <option value="1206">1206</option>
+                    <option value="1210">1210</option>
+                    <option value="1812">1812</option>
+                    <option value="2010">2010</option>
+                    <option value="2220">2220</option>
+                    <option value="2512">2512</option>
+                </select>
+                <button class="btn btn-primary" onclick="addAlias()">Add</button>
+            </div>
+            <span id="aliasResult" style="display: block; margin-top: 8px; font-size: 13px;"></span>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -123,6 +154,73 @@
         btn.disabled = false;
     }
 
+    async function loadAliases() {
+        const container = document.getElementById('aliasesTable');
+        try {
+            const data = await apiCall('/api/settings/package-aliases');
+            if (data.success && data.aliases && data.aliases.length > 0) {
+                let html = '<table style="width: 100%; font-size: 13px; border-collapse: collapse;">';
+                html += '<tr style="color: var(--text-muted); border-bottom: 1px solid var(--border-color);">'
+                      + '<th style="text-align: left; padding: 4px 8px;">Pattern</th>'
+                      + '<th style="text-align: left; padding: 4px 8px;">Package</th>'
+                      + '<th style="width: 40px;"></th></tr>';
+                for (const a of data.aliases) {
+                    html += `<tr style="border-bottom: 1px solid var(--border-color);">`
+                          + `<td style="padding: 4px 8px; font-family: monospace;">${a.pattern}</td>`
+                          + `<td style="padding: 4px 8px;">${a.package}</td>`
+                          + `<td style="padding: 4px 8px;"><button onclick="removeAlias('${a.pattern.replace(/'/g, "\\'")}')" `
+                          + `style="background: none; border: none; color: var(--color-danger); cursor: pointer; font-size: 15px;" `
+                          + `title="Remove">&times;</button></td></tr>`;
+                }
+                html += '</table>';
+                container.innerHTML = html;
+            } else {
+                container.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">No aliases configured</span>';
+            }
+        } catch (e) {
+            container.innerHTML = '<span style="color: var(--text-muted); font-size: 13px;">No aliases configured</span>';
+        }
+    }
+
+    async function addAlias() {
+        const pattern = document.getElementById('aliasPattern').value.trim();
+        const pkg = document.getElementById('aliasPackage').value;
+        const result = document.getElementById('aliasResult');
+        if (!pattern) { result.textContent = 'Enter a pattern'; result.style.color = 'var(--color-danger)'; return; }
+        try {
+            const data = await apiCall('/api/settings/package-aliases', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pattern: pattern, package: pkg })
+            });
+            if (data.success) {
+                document.getElementById('aliasPattern').value = '';
+                result.textContent = '';
+                loadAliases();
+            } else {
+                result.textContent = data.error || 'Failed to add alias';
+                result.style.color = 'var(--color-danger)';
+            }
+        } catch (e) {
+            result.textContent = e.message;
+            result.style.color = 'var(--color-danger)';
+        }
+    }
+
+    async function removeAlias(pattern) {
+        try {
+            await apiCall('/api/settings/package-aliases', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ pattern: pattern })
+            });
+            loadAliases();
+        } catch (e) {
+            console.error('Failed to remove alias:', e);
+        }
+    }
+
     loadIndexStats();
+    loadAliases();
 </script>
 {% endblock %}
