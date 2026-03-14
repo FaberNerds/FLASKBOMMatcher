@@ -647,6 +647,24 @@ function showRowDetailModal(rowIndex) {
         <div class="modal-body">${bodyHtml}</div>
     `;
 
+    // MPN click handler: Click=Copy, Ctrl+Click=Google, Alt+Click=DigiKey
+    modalEl.addEventListener('click', function(e) {
+        if (e.target.classList.contains('mpn-clickable')) {
+            const mpn = e.target.innerText.trim();
+            if (!mpn) return;
+
+            if (e.ctrlKey || e.metaKey) {
+                e.preventDefault();
+                window.open(`https://www.google.com/search?q=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
+            } else if (e.altKey) {
+                e.preventDefault();
+                window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
+            } else {
+                navigator.clipboard.writeText(mpn).catch(() => {});
+            }
+        }
+    });
+
     overlay.appendChild(modalEl);
 
     // Close on backdrop click
@@ -755,7 +773,7 @@ function buildAlternativesTable(suggestions, rowIndex) {
             <td><strong>${fabernr}</strong></td>
             <td title="${escapeHtml(s.Omschrijving || '')}">${descHtml}</td>
             <td>${escapeHtml(s.Manufacturer || '')}</td>
-            <td>${escapeHtml(s.MPN || '')}</td>
+            <td><span class="mpn-clickable" title="Click: Copy | Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(s.MPN || '')}</span></td>
             <td>${escapeHtml(s.KlantNr || '')}</td>
             <td>${escapeHtml(s.KlantNaam || '')}</td>
             <td>${escapeHtml(s.Magazijn || '')}</td>

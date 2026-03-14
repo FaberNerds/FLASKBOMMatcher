@@ -438,6 +438,16 @@
     max-width: 180px;
 }
 
+/* Description columns: double default width */
+.split-panel .data-table .desc-col,
+.split-panel .data-table .desc-th,
+.split-panel-right .data-table th:nth-child(2),
+.split-panel-right .data-table td:nth-child(2) {
+    max-width: 360px;
+    min-width: 360px;
+    width: 360px;
+}
+
 /* Compact numeric columns in right panel */
 .split-panel-right .data-table td:nth-child(n+10),
 .split-panel-right .data-table th:nth-child(n+10) {
@@ -575,6 +585,12 @@
 .hl-mpn-partial {
     border-bottom: 3px solid #f59e0b;
     padding-bottom: 1px;
+}
+
+.mpn-clickable {
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
 }
 
 /* ========================================
