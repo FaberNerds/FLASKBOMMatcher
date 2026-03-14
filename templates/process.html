@@ -16,50 +16,75 @@
         BOM: <span id="bomName" style="color: var(--color-primary);"></span>
         <span id="bomStats" style="color: var(--text-muted); font-size: 13px; margin-left: 8px;"></span>
     </h2>
-    <button class="btn btn-primary" onclick="assessMpnfree()">Assign MPNfree?</button>
+    <button class="btn btn-outline" onclick="selectMpnfree()">Select MPNfree</button>
     <button class="btn btn-primary" onclick="findIpn()">Find IPN</button>
     <button class="btn btn-outline" onclick="exportBom()">Export</button>
 </div>
 
-<!-- Legend -->
-<div class="legend" style="display: flex; gap: 16px; margin-bottom: 12px; font-size: 12px;">
-    <span><span class="legend-dot legend-green"></span> Matched</span>
-    <span><span class="legend-dot legend-yellow"></span> Suggestion</span>
-    <span><span class="legend-dot legend-red"></span> No match</span>
-    <span><span class="legend-dot legend-gray"></span> MPNfree</span>
-</div>
-
-<!-- Main BOM Table -->
-<div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: white;">
-    <table class="data-table" id="bomTable">
-        <thead id="bomTableHead"></thead>
-        <tbody id="bomTableBody"></tbody>
-    </table>
-</div>
-
-<!-- Suggestion Panel (floating) -->
-<div class="suggestion-panel" id="suggestionPanel" style="display: none;">
-    <div class="suggestion-panel-header">
-        <h3>Suggestions for row <span id="suggestionRowIdx"></span></h3>
-        <button class="btn btn-outline btn-sm" onclick="closeSuggestionPanel()">Close</button>
-    </div>
-    <div class="suggestion-panel-body">
-        <table class="data-table" id="suggestionTable">
-            <thead>
-                <tr>
-                    <th>FaberNr</th>
-                    <th>Description</th>
-                    <th>Manufacturer</th>
-                    <th>MPN</th>
-                    <th>Status</th>
-                    <th>Stock</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody id="suggestionBody"></tbody>
-        </table>
+<!-- Summary Badges -->
+<div id="summaryBadges" style="display: none; margin-bottom: 12px;">
+    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+        <div class="summary-badge summary-badge-green">
+            <span class="summary-badge-count" id="matchedCount">0</span>
+            <span class="summary-badge-label">Matched</span>
+        </div>
+        <div class="summary-badge summary-badge-yellow">
+            <span class="summary-badge-count" id="partialCount">0</span>
+            <span class="summary-badge-label">Partial</span>
+        </div>
+        <div class="summary-badge summary-badge-red">
+            <span class="summary-badge-count" id="noMatchCount">0</span>
+            <span class="summary-badge-label">No match</span>
+        </div>
+        <div class="summary-badge summary-badge-blue" id="paramBadge" style="display: none;">
+            <span class="summary-badge-count" id="paramCount">0</span>
+            <span class="summary-badge-label">Parameterized</span>
+        </div>
     </div>
 </div>
+
+<!-- Search/Filter Bar -->
+<div id="filterBar" style="display: none; margin-bottom: 12px;">
+    <div style="display: flex; gap: 8px; align-items: center;">
+        <input type="text" class="form-input" id="searchInput" placeholder="Search..."
+               oninput="filterTable()" style="flex: 1; max-width: 300px;">
+        <select class="form-select" id="statusFilter" onchange="filterTable()" style="width: auto;">
+            <option value="all">All status</option>
+            <option value="matched">Matched</option>
+            <option value="partial">Partial</option>
+            <option value="nomatch">No match</option>
+        </select>
+    </div>
+</div>
+
+<!-- Split Panel Layout -->
+<div class="split-panel" id="splitPanel">
+    <!-- Left Panel: Customer BOM -->
+    <div class="split-panel-left">
+        <div class="split-panel-header">Customer BOM</div>
+        <div class="split-panel-scroll" id="leftScroll">
+            <table class="data-table" id="leftTable">
+                <thead id="leftTableHead"></thead>
+                <tbody id="leftTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Divider -->
+    <div class="split-panel-divider"></div>
+
+    <!-- Right Panel: ERP Matches -->
+    <div class="split-panel-right">
+        <div class="split-panel-header">ERP Matches</div>
+        <div class="split-panel-scroll" id="rightScroll">
+            <table class="data-table" id="rightTable">
+                <thead id="rightTableHead"></thead>
+                <tbody id="rightTableBody"></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 {% endblock %}
 
 {% block extra_scripts %}

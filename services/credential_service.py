@@ -173,7 +173,7 @@ def get_mistral_api_key() -> Optional[str]:
 # ============================================================================
 
 def save_ai_provider(provider: str) -> None:
-    if provider not in ('mistral', 'openrouter'):
+    if provider not in ('mistral', 'openrouter', 'ollama'):
         raise ValueError(f"Invalid provider: {provider}")
     mgr = get_credential_manager()
     mgr.set_credentials('ai_provider', {'provider': provider})
@@ -185,6 +185,31 @@ def get_ai_provider() -> str:
     if creds:
         return creds.get('provider', 'mistral')
     return 'mistral'
+
+
+# ============================================================================
+# Ollama Settings Storage
+# ============================================================================
+
+def save_ollama_settings(host: str, model: str) -> None:
+    """Save Ollama host URL and model name."""
+    mgr = get_credential_manager()
+    mgr.set_credentials('ollama', {'host': host, 'model': model})
+
+
+def get_ollama_settings() -> dict:
+    """Get Ollama host and model. Returns defaults if not configured."""
+    mgr = get_credential_manager()
+    creds = mgr.get_credentials('ollama')
+    if creds:
+        return {
+            'host': creds.get('host', 'http://DESKTOP-DANIELCLEAVER:11434'),
+            'model': creds.get('model', 'qwen3.5:9b')
+        }
+    return {
+        'host': 'http://DESKTOP-DANIELCLEAVER:11434',
+        'model': 'qwen3.5:9b'
+    }
 
 
 # ============================================================================

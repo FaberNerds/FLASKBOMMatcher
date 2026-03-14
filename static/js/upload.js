@@ -3,7 +3,7 @@
  * Handles file upload, sheet/header selection, row range, column mapping, and navigation.
  */
 
-const standardColumns = ['Manufacturer', 'MPN', 'Description', 'Quantity', 'Refdes', 'FaberNr'];
+const standardColumns = ['Manufacturer', 'MPN', 'Description', 'Quantity', 'Refdes'];
 let currentHeaders = [];
 let currentRows = [];
 
@@ -88,15 +88,8 @@ async function uploadFile(file) {
             document.getElementById('sheetSelector').style.display = 'none';
         }
 
-        // Show header row slider & row range controls
-        const headerSection = document.getElementById('headerRowSection');
-        const headerSlider = document.getElementById('headerRowSlider');
-        const headerValue = document.getElementById('headerRowValue');
+        // Show row range controls and generic RC checkbox
         const rowRangeSection = document.getElementById('rowRangeSection');
-
-        if (headerSection) headerSection.style.display = 'block';
-        if (headerSlider) headerSlider.value = 0;
-        if (headerValue) headerValue.textContent = '1';
         if (rowRangeSection) rowRangeSection.style.display = 'block';
         clearRowRangeInputs();
 
@@ -119,18 +112,9 @@ async function uploadFile(file) {
 // ========================================================================
 
 document.getElementById('sheetSelect')?.addEventListener('change', reloadFile);
-document.getElementById('headerRowSlider')?.addEventListener('input', (e) => {
-    document.getElementById('headerRowValue').textContent = String(parseInt(e.target.value) + 1);
-});
-document.getElementById('headerRowSlider')?.addEventListener('change', () => {
-    selectedHeaderRow = parseInt(document.getElementById('headerRowSlider').value);
-    rowRange = { start: null, end: null };
-    clearRowRangeInputs();
-    reloadFile();
-});
 
 async function reloadFile() {
-    const headerRow = parseInt(document.getElementById('headerRowSlider').value);
+    const headerRow = selectedHeaderRow;
     const sheetSelect = document.getElementById('sheetSelect');
     const sheetName = sheetSelect ? sheetSelect.value : null;
 
@@ -257,22 +241,11 @@ async function setAsHeaderRow() {
     }
 
     // The clicked row index is relative to the current data rows.
-    // We need to map it to the raw file row number.
     // Current header_row + 1 (for the header itself) + contextMenuRowIndex = raw row
-    const currentHeaderRow = parseInt(document.getElementById('headerRowSlider').value);
-    const newHeaderRow = currentHeaderRow + 1 + contextMenuRowIndex;
+    const newHeaderRow = selectedHeaderRow + 1 + contextMenuRowIndex;
 
     hideRowContextMenu();
 
-    // Update slider
-    if (newHeaderRow <= 20) {
-        document.getElementById('headerRowSlider').value = newHeaderRow;
-        document.getElementById('headerRowSlider').max = Math.max(20, newHeaderRow);
-    } else {
-        document.getElementById('headerRowSlider').max = newHeaderRow;
-        document.getElementById('headerRowSlider').value = newHeaderRow;
-    }
-    document.getElementById('headerRowValue').textContent = String(newHeaderRow + 1);
     selectedHeaderRow = newHeaderRow;
 
     // Reset row range when header changes
@@ -417,8 +390,7 @@ function autoMatch(standardCol, headerCol) {
         'mpn': ['mpn', 'part number', 'partnumber', 'part no', 'mfr part', 'manufacturer part'],
         'description': ['description', 'desc', 'omschrijving', 'component', 'part description'],
         'quantity': ['quantity', 'qty', 'aantal', 'count', 'amount'],
-        'refdes': ['refdes', 'reference', 'ref des', 'designator', 'reference designator'],
-        'fabernr': ['fabernr', 'ipn', 'internal part', 'faber', 'internal', 'faber nr']
+        'refdes': ['refdes', 'reference', 'ref des', 'designator', 'reference designator']
     };
 
     const aliasList = aliases[std] || [std];

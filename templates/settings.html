@@ -43,6 +43,10 @@
                     <input type="radio" name="aiProvider" value="openrouter" id="providerOpenrouter">
                     OpenRouter (fallback)
                 </label>
+                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                    <input type="radio" name="aiProvider" value="ollama" id="providerOllama">
+                    Ollama (local)
+                </label>
             </div>
         </div>
     </div>
@@ -77,6 +81,45 @@
         </div>
     </div>
 
+    <!-- Ollama Settings -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">Ollama Settings</h3>
+            <p class="card-subtitle">Local AI — no API key needed</p>
+        </div>
+        <div class="card-body">
+            <div style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px; font-weight: 500; margin-bottom: 4px; display: block;">Host URL</label>
+                <input type="text" class="form-input" id="ollamaHost"
+                       placeholder="http://DESKTOP-DANIELCLEAVER:11434" style="width: 100%;">
+            </div>
+            <div style="margin-bottom: 12px;">
+                <label class="form-label" style="font-size: 13px; font-weight: 500; margin-bottom: 4px; display: block;">Model</label>
+                <input type="text" class="form-input" id="ollamaModel"
+                       placeholder="qwen3.5:9b" style="width: 100%;">
+            </div>
+            <button class="btn btn-primary" onclick="saveOllamaSettings()">Save</button>
+            <p id="ollamaStatus" style="font-size: 12px; color: var(--text-muted); margin-top: 8px;"></p>
+        </div>
+    </div>
+
+    <!-- Parameter Index -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">Parameter Index</h3>
+            <p class="card-subtitle">Local SQLite index for parameterized matching (resistors, capacitors, etc.)</p>
+        </div>
+        <div class="card-body">
+            <div id="indexStats" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+                Loading index stats...
+            </div>
+            <button class="btn btn-primary" id="rebuildIndexBtn" onclick="rebuildIndex()">
+                Rebuild Index
+            </button>
+            <span id="rebuildResult" style="margin-left: 12px; font-size: 13px;"></span>
+        </div>
+    </div>
+
     <!-- ERP Description Examples -->
     <div class="card" style="margin-bottom: 20px;">
         <div class="card-header">
@@ -98,9 +141,10 @@
     // Load current settings on page load
     async function loadSettings() {
         try {
-            const [mistral, openrouter, provider, examples] = await Promise.all([
+            const [mistral, openrouter, ollama, provider, examples] = await Promise.all([
                 apiCall('/api/settings/mistral'),
                 apiCall('/api/settings/openrouter'),
+                apiCall('/api/settings/ollama'),
                 apiCall('/api/settings/ai-provider'),
                 apiCall('/api/settings/erp-examples')
             ]);
@@ -119,9 +163,16 @@
                 document.getElementById('openrouterStatus').textContent = 'Not configured';
             }
 
+            // Ollama
+            document.getElementById('ollamaHost').placeholder = ollama.host;
+            document.getElementById('ollamaModel').placeholder = ollama.model;
+            document.getElementById('ollamaStatus').textContent = `Host: ${ollama.host}, Model: ${ollama.model}`;
+
             // Provider
             if (provider.provider === 'openrouter') {
                 document.getElementById('providerOpenrouter').checked = true;
+            } else if (provider.provider === 'ollama') {
+                document.getElementById('providerOllama').checked = true;
             } else {
                 document.getElementById('providerMistral').checked = true;
             }
@@ -186,6 +237,21 @@
         } catch (e) { /* toast already shown */ }
     }
 
+    async function saveOllamaSettings() {
+        const host = document.getElementById('ollamaHost').value.trim();
+        const model = document.getElementById('ollamaModel').value.trim();
+        if (!host) return toast.warning('Enter Ollama host URL');
+        if (!model) return toast.warning('Enter model name');
+        try {
+            await apiCall('/api/settings/ollama', {
+                method: 'POST',
+                body: JSON.stringify({ host, model })
+            });
+            document.getElementById('ollamaStatus').textContent = `Host: ${host}, Model: ${model}`;
+            toast.success('Ollama settings saved');
+        } catch (e) { /* toast already shown */ }
+    }
+
     async function saveErpExamples() {
         const examples = document.getElementById('erpExamples').value;
         try {
@@ -210,6 +276,58 @@
         });
     });
 
+    async function loadIndexStats() {
+        try {
+            const data = await apiCall('/api/settings/index-stats');
+            if (data.success && data.stats) {
+                const s = data.stats;
+                let html = `<strong>${s.total_components}</strong> components, <strong>${s.total_parameters}</strong> parameters`;
+                if (s.last_build_time) {
+                    html += `<br>Last built: ${new Date(s.last_build_time).toLocaleString()}`;
+                }
+                if (s.per_category && Object.keys(s.per_category).length > 0) {
+                    const cats = Object.entries(s.per_category)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 8)
+                        .map(([cat, cnt]) => `${cat}: ${cnt}`)
+                        .join(', ');
+                    html += `<br><span style="font-size: 11px;">${cats}</span>`;
+                }
+                document.getElementById('indexStats').innerHTML = html;
+            } else {
+                document.getElementById('indexStats').textContent = 'No index built yet';
+            }
+        } catch (e) {
+            document.getElementById('indexStats').textContent = 'No index built yet';
+        }
+    }
+
+    async function rebuildIndex() {
+        const btn = document.getElementById('rebuildIndexBtn');
+        const result = document.getElementById('rebuildResult');
+        btn.disabled = true;
+        result.textContent = 'Building index... this may take a moment';
+        result.style.color = 'var(--text-muted)';
+
+        try {
+            const data = await apiCall('/api/settings/rebuild-index', { method: 'POST' });
+            if (data.success) {
+                const s = data.stats;
+                result.textContent = `Done! ${s.total} components, ${s.parameters_extracted} params in ${s.elapsed_seconds}s`;
+                result.style.color = 'var(--color-success)';
+                loadIndexStats();
+            } else {
+                result.textContent = 'Rebuild failed: ' + (data.error || 'Unknown error');
+                result.style.color = 'var(--color-danger)';
+            }
+        } catch (e) {
+            result.textContent = 'Rebuild failed: ' + e.message;
+            result.style.color = 'var(--color-danger)';
+        }
+        btn.disabled = false;
+    }
+
+    loadIndexStats();
     loadSettings();
 </script>
 {% endblock %}

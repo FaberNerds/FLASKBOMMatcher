@@ -74,12 +74,15 @@ def search_with_variants(
     Results from earlier (more specific) variants are ranked higher.
     """
     variants = generate_mpn_variants(mpn)
+    logger.debug(f"MPN variants for '{mpn}': {variants}")
     seen_fabernr = set()
     results = []
 
     for variant in variants:
         try:
             hits = search_fn(variant)
+            new_hits = [h for h in hits if h.get('FaberNr', '') and h.get('FaberNr', '') not in seen_fabernr]
+            logger.debug(f"Variant '{variant}': {len(hits)} hits, {len(new_hits)} new unique")
             for hit in hits:
                 fnr = hit.get('FaberNr', '')
                 if fnr and fnr not in seen_fabernr:
@@ -90,4 +93,5 @@ def search_with_variants(
         except Exception as e:
             logger.warning(f"Variant search failed for '{variant}': {e}")
 
+    logger.info(f"'{mpn}' → {len(results)} unique results ({len(variants)} variants tried)")
     return results

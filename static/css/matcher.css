@@ -334,3 +334,352 @@
     padding: 4px 12px !important;
     font-size: 12px !important;
 }
+
+/* ========================================
+   SPLIT PANEL LAYOUT (Process Page)
+   ======================================== */
+
+.split-panel {
+    display: flex;
+    gap: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: white;
+    overflow: hidden;
+    height: calc(100vh - 220px);
+    min-height: 400px;
+}
+
+.split-panel-left,
+.split-panel-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.split-panel-header {
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: var(--color-gray-50);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+.split-panel-scroll {
+    overflow: auto;
+    flex: 1;
+}
+
+.split-panel-divider {
+    width: 1px;
+    background: var(--border-color);
+    flex-shrink: 0;
+}
+
+/* Split panel table tweaks */
+.split-panel .data-table {
+    font-size: 12px;
+    border: none;
+}
+
+.split-panel .data-table th,
+.split-panel .data-table td {
+    padding: 6px 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+}
+
+.split-panel .data-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--color-gray-50);
+}
+
+/* Selected row in split panel */
+.split-panel .data-table tr.row-selected {
+    outline: 2px solid var(--color-primary);
+    outline-offset: -2px;
+}
+
+.split-panel .data-table tr {
+    cursor: pointer;
+}
+
+/* ========================================
+   SUMMARY BADGES
+   ======================================== */
+
+.summary-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.summary-badge-count {
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.summary-badge-green {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.summary-badge-yellow {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.summary-badge-red {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.summary-badge-blue {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+/* ========================================
+   ALTERNATIVES PANEL
+   ======================================== */
+
+.alternatives-panel {
+    margin-top: 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: white;
+    max-height: 300px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.alternatives-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--color-gray-50);
+    flex-shrink: 0;
+}
+
+.alternatives-panel-header h3 {
+    margin: 0;
+    font-size: 14px;
+}
+
+.alternatives-panel-body {
+    overflow: auto;
+    flex: 1;
+}
+
+/* ========================================
+   MATCH HIGHLIGHTS (underline colors)
+   ======================================== */
+
+.hl-blue {
+    border-bottom: 2px solid #3b82f6;
+    padding-bottom: 1px;
+}
+
+.hl-green {
+    border-bottom: 2px solid #10b981;
+    padding-bottom: 1px;
+}
+
+.hl-orange {
+    border-bottom: 2px solid #f59e0b;
+    padding-bottom: 1px;
+}
+
+.hl-purple {
+    border-bottom: 2px solid #8b5cf6;
+    padding-bottom: 1px;
+}
+
+.hl-gray {
+    border-bottom: 2px solid #9ca3af;
+    padding-bottom: 1px;
+}
+
+.hl-mpn-exact {
+    border-bottom: 3px solid #10b981;
+    padding-bottom: 1px;
+    font-weight: 600;
+}
+
+.hl-mpn-partial {
+    border-bottom: 3px solid #f59e0b;
+    padding-bottom: 1px;
+}
+
+/* ========================================
+   SCORE BAR
+   ======================================== */
+
+.score-bar {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.score-bar-fill {
+    width: 40px;
+    height: 6px;
+    background: var(--color-gray-200);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.score-bar-fill-inner {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* ========================================
+   FULLSCREEN ROW DETAIL MODAL
+   ======================================== */
+
+.modal-fullscreen {
+    width: 95vw;
+    max-width: 95vw;
+    height: 90vh;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+}
+
+.modal-fullscreen .modal-body {
+    flex: 1;
+    max-height: none;
+    overflow: hidden;
+    padding: 0;
+    display: flex;
+    white-space: normal;
+}
+
+.row-detail-left {
+    width: 320px;
+    min-width: 280px;
+    border-right: 1px solid var(--border-color);
+    padding: 16px;
+    overflow-y: auto;
+    background: var(--color-gray-50);
+    flex-shrink: 0;
+}
+
+.row-detail-right {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-width: 0;
+}
+
+.row-detail-field {
+    margin-bottom: 12px;
+}
+
+.row-detail-field-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.row-detail-field-value {
+    font-size: 14px;
+    color: var(--text-main);
+    word-break: break-word;
+}
+
+.row-detail-alternatives {
+    flex: 1;
+    overflow: auto;
+    padding: 0;
+}
+
+.row-detail-alternatives .data-table {
+    font-size: 12px;
+    border: none;
+}
+
+.row-detail-alternatives .data-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--color-gray-50);
+}
+
+.row-detail-search {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    background: var(--color-gray-50);
+    flex-shrink: 0;
+}
+
+.row-detail-search select {
+    width: 140px;
+}
+
+.row-detail-search input {
+    flex: 1;
+}
+
+.row-detail-header {
+    padding: 8px 16px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: var(--color-gray-50);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+/* ========================================
+   MPNFREE DROPDOWN IN TABLE
+   ======================================== */
+
+.mpnfree-dropdown {
+    padding: 2px 4px;
+    font-size: 11px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: white;
+    cursor: pointer;
+}
+
+.mpnfree-dropdown.mpnfree-yes {
+    background: #dbeafe;
+    border-color: #93c5fd;
+    color: #1e40af;
+}
+
+.mpnfree-dropdown.mpnfree-no {
+    background: white;
+}

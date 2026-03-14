@@ -23,7 +23,7 @@ MAX_CONTENT_LENGTH = 16 * 1024 * 1024
 # Environment configuration
 DEBUG_MODE = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
 FLASK_HOST = os.environ.get('FLASK_HOST', '0.0.0.0')
-FLASK_PORT = int(os.environ.get('FLASK_PORT', '50084'))
+FLASK_PORT = int(os.environ.get('FLASK_PORT', '50085'))
 
 # File cleanup settings (hours) - 1 week default
 FILE_RETENTION_HOURS = int(os.environ.get('FILE_RETENTION_HOURS', '168'))
@@ -35,7 +35,6 @@ STANDARD_COLUMNS = [
     'Description',
     'Quantity',
     'Refdes',
-    'FaberNr'
 ]
 
 

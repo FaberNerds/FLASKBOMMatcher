@@ -5,6 +5,7 @@ Uses Mistral Large with OpenRouter fallback, same pattern as BOMcompare.
 """
 import json
 import logging
+import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,13 @@ AI_PROVIDERS = {
             "HTTP-Referer": "https://bommatcher.local",
             "X-Title": "BOM Matcher"
         }
+    },
+    'ollama': {
+        'url': 'http://DESKTOP-DANIELCLEAVER:11434/v1/chat/completions',
+        'model': 'qwen3.5:9b',
+        'headers_fn': lambda key: {
+            "Content-Type": "application/json"
+        }
     }
 }
 
@@ -45,11 +53,21 @@ def _call_ai(prompt: str, api_key: str, provider: str = 'mistral',
     if not REQUESTS_AVAILABLE:
         logger.error("requests module not available")
         return None
-    if not api_key:
+    if not api_key and provider != 'ollama':
         logger.error("AI API key not configured")
         return None
 
-    provider_config = AI_PROVIDERS.get(provider, AI_PROVIDERS['mistral'])
+    provider_config = dict(AI_PROVIDERS.get(provider, AI_PROVIDERS['mistral']))
+
+    # Ollama: override URL/model from user settings, disable reasoning
+    if provider == 'ollama':
+        from services.credential_service import get_ollama_settings
+        settings = get_ollama_settings()
+        provider_config['url'] = f"{settings['host'].rstrip('/')}/v1/chat/completions"
+        provider_config['model'] = settings['model']
+        prompt = prompt + "\n/no_think"
+
+    timeout = 120 if provider == 'ollama' else 60
 
     try:
         response = requests.post(
@@ -61,14 +79,16 @@ def _call_ai(prompt: str, api_key: str, provider: str = 'mistral',
                 "temperature": temperature,
                 "max_tokens": max_tokens
             },
-            timeout=60
+            timeout=timeout
         )
         response.raise_for_status()
         data = response.json()
         content = data.get('choices', [{}])[0].get('message', {}).get('content', '')
 
+        # Strip <think>...</think> blocks (safety net for reasoning models)
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+
         # Strip markdown code blocks if present
-        content = content.strip()
         if content.startswith('```'):
             lines = content.split('\n')
             content = '\n'.join(lines[1:-1] if lines[-1].strip() == '```' else lines[1:])
@@ -103,14 +123,16 @@ def assess_mpnfree_batch(
         batch = rows[i:i + batch_size]
 
         prompt_parts = [
-            "Analyze each BOM line and determine if it is 'MPNfree' (generic component where any equivalent manufacturer is acceptable).\n",
-            "Rules:",
-            "- Empty or missing MPN → likely MPNfree",
-            "- Standard passive components (resistors, capacitors, inductors) with generic descriptions → MPNfree",
-            "- Components with specific manufacturer AND specific MPN → NOT MPNfree",
-            "- Specific ICs, microcontrollers, FPGAs, connectors with exact part numbers → NOT MPNfree",
-            "- LEDs, diodes with generic descriptions → MPNfree",
-            "- Mechanical parts (screws, standoffs, heatsinks) → MPNfree\n",
+            "Analyze each BOM line and determine if it is 'MPNfree' (a standard generic component where we can buy from any manufacturer).\n",
+            "Rules for MPNfree = YES (ONLY these standard passive components):",
+            "- Standard RESISTORS: descriptions containing RES, resistor, ohm, or E-notation values (4R7, 8E2, 100K), with standard packages (0201, 0402, 0603, 0805, 1206) and standard tolerances (1%, 5%)",
+            "- Standard CAPACITORS: descriptions containing CAP, capacitor, or dielectric codes (X7R, C0G, NP0, X5R, Y5V), with standard packages (0201, 0402, 0603, 0805, 1206) and standard capacitance values (pF, nF, uF)\n",
+            "Rules for MPNfree = NO (everything else):",
+            "- Components with a specific MPN AND specific manufacturer → NOT MPNfree",
+            "- ICs, microcontrollers, FPGAs, ASICs, voltage regulators → NOT MPNfree",
+            "- Connectors, crystals, oscillators, LEDs with specific part numbers → NOT MPNfree",
+            "- Inductors, ferrite beads, transformers → NOT MPNfree",
+            "- Any component that is NOT a standard resistor or capacitor → NOT MPNfree\n",
             "BOM lines to analyze:"
         ]
 

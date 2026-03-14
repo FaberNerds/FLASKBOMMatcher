@@ -8,11 +8,13 @@ from flask import Blueprint, request, jsonify
 from services.credential_service import (
     save_mistral_credentials, get_mistral_api_key,
     save_openrouter_credentials, get_openrouter_api_key,
+    save_ollama_settings, get_ollama_settings,
     save_ai_provider, get_ai_provider,
     save_erp_examples, get_erp_examples,
     mask_secret
 )
 from services.search_service import test_connection
+from services.category_index_service import build_index, get_index_stats
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +55,27 @@ def openrouter_key():
         })
 
 
+@settings_bp.route('/settings/ollama', methods=['GET', 'POST'])
+def ollama_settings():
+    if request.method == 'POST':
+        data = request.get_json()
+        host = data.get('host', '').strip()
+        model = data.get('model', '').strip()
+        if not host:
+            return jsonify({'error': 'Ollama host URL required'}), 400
+        if not model:
+            return jsonify({'error': 'Model name required'}), 400
+        save_ollama_settings(host, model)
+        return jsonify({'success': True, 'host': host, 'model': model})
+    else:
+        settings = get_ollama_settings()
+        return jsonify({
+            'configured': True,
+            'host': settings['host'],
+            'model': settings['model']
+        })
+
+
 @settings_bp.route('/settings/ai-provider', methods=['GET', 'POST'])
 def ai_provider():
     if request.method == 'POST':
@@ -86,3 +109,29 @@ def test_db_connection():
         return jsonify({'success': success, 'message': message})
     except Exception as e:
         return jsonify({'success': False, 'message': f'Test failed: {str(e)}'}), 500
+
+
+@settings_bp.route('/settings/rebuild-index', methods=['POST'])
+def rebuild_index():
+    """Rebuild the parameter index from ERP data."""
+    try:
+        logger.info("Parameter index rebuild requested")
+        stats = build_index()
+        return jsonify({
+            'success': True,
+            'stats': stats
+        })
+    except Exception as e:
+        logger.error(f"rebuild_index error: {e}")
+        return jsonify({'success': False, 'error': f'Rebuild failed: {str(e)}'}), 500
+
+
+@settings_bp.route('/settings/index-stats', methods=['GET'])
+def index_stats():
+    """Get current parameter index statistics."""
+    try:
+        stats = get_index_stats()
+        return jsonify({'success': True, 'stats': stats})
+    except Exception as e:
+        logger.error(f"index_stats error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500

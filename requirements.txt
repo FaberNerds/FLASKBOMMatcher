@@ -12,6 +12,9 @@ xlrd>=2.0.0
 # SQL Server connectivity (for Exact ERP integration)
 pyodbc>=4.0.0
 
+# Windows Credential Manager access (used by ExactSearchTool)
+keyring>=24.0.0
+
 # Encryption for credential storage (cross-platform)
 cryptography>=41.0.0
 

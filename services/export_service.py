@@ -81,8 +81,8 @@ def export_bom(
                 fabernr = auto.get('FaberNr', '')
                 confidence = match_data.get('confidence', 'low')
 
-        # Determine MPNfree value
-        is_mpnfree = ''
+        # Determine MPNfree value (default to No if never assessed)
+        is_mpnfree = 'No'
         if sel.get('mpnfree') is not None:
             is_mpnfree = 'Yes' if sel['mpnfree'] else 'No'
         elif str_idx in mpnfree:

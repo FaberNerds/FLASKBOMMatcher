@@ -25,15 +25,36 @@ except ImportError:
     LIMITER_AVAILABLE = False
 
 # Configure logging
-log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-logging.basicConfig(level=logging.INFO, format=log_format)
-logger = logging.getLogger(__name__)
+import sys
+class _ShortNameFormatter(logging.Formatter):
+    """Formatter that shortens logger names for readable terminal output."""
+    def format(self, record):
+        # 'services.match_service' -> 'match', 'routes.match_api' -> 'match_api'
+        parts = record.name.rsplit('.', 1)
+        record.shortname = parts[-1].replace('_service', '').replace('_api', '_api')
+        return super().format(record)
+
+log_format = '%(asctime)s  %(shortname)-12s  %(message)s'
+log_datefmt = '%H:%M:%S'
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.handlers.clear()
+
+# Always log to stdout
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setLevel(logging.DEBUG if config.DEBUG_MODE else logging.INFO)
+stream_handler.setFormatter(_ShortNameFormatter(log_format, datefmt=log_datefmt))
+root_logger.addHandler(stream_handler)
 
 if not config.DEBUG_MODE:
-    file_handler = RotatingFileHandler('server.log', maxBytes=10*1024*1024, backupCount=5)
-    file_handler.setFormatter(logging.Formatter(log_format))
+    # Production: also log to file
+    import os as _os
+    _log_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'server.log')
+    file_handler = RotatingFileHandler(_log_path, maxBytes=10*1024*1024, backupCount=5)
+    file_handler.setFormatter(_ShortNameFormatter(log_format, datefmt=log_datefmt))
     file_handler.setLevel(logging.INFO)
-    logging.getLogger().addHandler(file_handler)
+    root_logger.addHandler(file_handler)
+logger = logging.getLogger(__name__)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -162,7 +183,8 @@ if __name__ == '__main__':
     if os.path.exists(ssl_cert) and os.path.exists(ssl_key):
         logger.info(f"Starting HTTPS server on {config.FLASK_HOST}:{config.FLASK_PORT}")
         app.run(debug=config.DEBUG_MODE, host=config.FLASK_HOST, port=config.FLASK_PORT,
-                ssl_context=(ssl_cert, ssl_key))
+                use_reloader=False, ssl_context=(ssl_cert, ssl_key))
     else:
         logger.info(f"Starting HTTP server on {config.FLASK_HOST}:{config.FLASK_PORT}")
-        app.run(debug=config.DEBUG_MODE, host=config.FLASK_HOST, port=config.FLASK_PORT)
+        app.run(debug=config.DEBUG_MODE, host=config.FLASK_HOST, port=config.FLASK_PORT,
+                use_reloader=False)

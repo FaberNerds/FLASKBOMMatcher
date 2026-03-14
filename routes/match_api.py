@@ -1,6 +1,6 @@
 """
 BOM Matcher - Match API Routes
-Handles IPN finding, MPNfree assessment, and overrides.
+Handles IPN finding, MPNfree assessment, manual search, and overrides.
 """
 import logging
 from flask import Blueprint, request, jsonify
@@ -11,6 +11,7 @@ from services.session_service import (
     save_selections, load_selections
 )
 from services.match_service import find_ipn_batch, find_ipn_single
+from services import search_service
 from services.ai_service import assess_mpnfree_batch
 from services.credential_service import (
     get_mistral_api_key, get_openrouter_api_key, get_ai_provider
@@ -26,6 +27,7 @@ def find_ipn():
     """Batch find IPN for all BOM rows."""
     bom_data = load_bom_data()
     if not bom_data:
+        logger.warning("find_ipn called but no BOM data loaded")
         return jsonify({'error': 'No BOM data loaded'}), 400
 
     rows = bom_data.get('rows', [])
@@ -34,8 +36,24 @@ def find_ipn():
     if not rows:
         return jsonify({'error': 'BOM has no rows'}), 400
 
+    # Build per-row mpnfree flags from session (AI + user overrides)
+    mpnfree = load_mpnfree() or {}
+    selections = load_selections() or {}
+
+    mpnfree_flags = {}
+    for i in range(len(rows)):
+        str_idx = str(i)
+        sel = selections.get(str_idx, {})
+        if sel.get('mpnfree') is not None:
+            mpnfree_flags[str_idx] = sel['mpnfree']
+        elif str_idx in mpnfree:
+            mpnfree_flags[str_idx] = mpnfree[str_idx].get('mpnfree', False)
+
+    mpnfree_count = sum(1 for v in mpnfree_flags.values() if v)
+    logger.info(f"=== IPN SEARCH START === {len(rows)} rows, {mpnfree_count} MPNfree")
+
     try:
-        results = find_ipn_batch(rows, mapping)
+        results = find_ipn_batch(rows, mapping, mpnfree_flags=mpnfree_flags)
 
         # Convert to dict keyed by row index for storage
         matches_dict = {}
@@ -44,11 +62,16 @@ def find_ipn():
 
         save_matches(matches_dict)
 
+        matched = sum(1 for r in results if r['confidence'] != 'none')
+        param_matched = sum(1 for r in results if r.get('search_method') == 'parameterized')
+        logger.info(f"=== IPN SEARCH DONE === {matched}/{len(results)} rows matched ({param_matched} parameterized)")
+
         return jsonify({
             'success': True,
             'results': results,
-            'matched': sum(1 for r in results if r['confidence'] != 'none'),
-            'total': len(results)
+            'matched': matched,
+            'total': len(results),
+            'parameterized': param_matched
         })
     except Exception as e:
         logger.error(f"find_ipn error: {e}")
@@ -73,8 +96,23 @@ def find_ipn_single_route():
     if row_index < 0 or row_index >= len(rows):
         return jsonify({'error': 'Invalid row index'}), 400
 
+    # Check mpnfree status for this row
+    mpnfree = load_mpnfree() or {}
+    selections_data = load_selections() or {}
+    str_idx = str(row_index)
+    sel = selections_data.get(str_idx, {})
+    is_mpnfree = False
+    if sel.get('mpnfree') is not None:
+        is_mpnfree = sel['mpnfree']
+    elif str_idx in mpnfree:
+        is_mpnfree = mpnfree[str_idx].get('mpnfree', False)
+
+    logger.info(f"Re-search row {row_index}, mpnfree={is_mpnfree}")
+
     try:
-        result = find_ipn_single(row_index, rows[row_index], mapping)
+        result = find_ipn_single(row_index, rows[row_index], mapping, is_mpnfree=is_mpnfree)
+
+        logger.info(f"Row {row_index} result: {result['search_method']}, {result['confidence']}, {len(result['suggestions'])} suggestions")
 
         # Update stored matches
         matches = load_matches() or {}
@@ -84,6 +122,57 @@ def find_ipn_single_route():
         return jsonify({'success': True, 'result': result})
     except Exception as e:
         logger.error(f"find_ipn_single error: {e}")
+        return jsonify({'error': f'Search failed: {str(e)}'}), 500
+
+
+@match_bp.route('/match/manual-search', methods=['POST'])
+def manual_search():
+    """Manual search by MPN, IPN, or description terms."""
+    data = request.get_json()
+    row_index = data.get('row_index')
+    search_type = data.get('search_type', 'description')
+    query = data.get('query', '').strip()
+
+    if not query:
+        return jsonify({'error': 'Search query required'}), 400
+
+    logger.info(f"Manual search row {row_index}: type={search_type}, query='{query}'")
+
+    try:
+        if search_type == 'mpn':
+            suggestions = search_service.search_by_mpn(query)
+        elif search_type == 'ipn':
+            suggestions = search_service.search_by_ipn(query)
+        else:
+            # Description: split into terms
+            terms = query.split()
+            suggestions = search_service.search_by_description(terms)
+
+        suggestions = suggestions[:20]
+
+        # Build a result dict compatible with matchResults
+        confidence = 'low' if suggestions else 'none'
+        result = {
+            'row_index': row_index,
+            'search_method': f'manual_{search_type}',
+            'suggestions': suggestions,
+            'auto_selected': suggestions[0] if suggestions else None,
+            'confidence': confidence
+        }
+
+        # Update stored matches
+        if row_index is not None:
+            matches = load_matches() or {}
+            matches[str(row_index)] = result
+            save_matches(matches)
+
+        return jsonify({
+            'success': True,
+            'suggestions': suggestions,
+            'result': result
+        })
+    except Exception as e:
+        logger.error(f"manual_search error: {e}")
         return jsonify({'error': f'Search failed: {str(e)}'}), 500
 
 
@@ -102,7 +191,12 @@ def assess_mpnfree():
 
     # Get AI credentials
     provider = get_ai_provider()
-    api_key = get_mistral_api_key() if provider == 'mistral' else get_openrouter_api_key()
+    if provider == 'mistral':
+        api_key = get_mistral_api_key()
+    elif provider == 'ollama':
+        api_key = 'ollama-local'
+    else:
+        api_key = get_openrouter_api_key()
     if not api_key:
         return jsonify({'error': f'No API key configured for {provider}. Configure in Settings.'}), 400
 
