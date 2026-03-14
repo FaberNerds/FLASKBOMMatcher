@@ -49,8 +49,8 @@ def export_bom(
     mpnfree = mpnfree or {}
     selections = selections or {}
 
-    # Write headers: original columns + FaberNr + MPNfree?
-    all_headers = list(headers) + ['FaberNr', 'MPNfree?']
+    # Write headers: original columns + FaberNr + F Omschrijving + F Manufacturer + F MPN + MPNfree?
+    all_headers = list(headers) + ['FaberNr', 'F Omschrijving', 'F Manufacturer', 'F MPN', 'MPNfree?']
     for col_idx, header in enumerate(all_headers, 1):
         cell = ws.cell(row=1, column=col_idx, value=header)
         cell.fill = HEADER_FILL
@@ -89,12 +89,25 @@ def export_bom(
             mpnfree_data = mpnfree[str_idx]
             is_mpnfree = 'Yes' if mpnfree_data.get('mpnfree') else 'No'
 
+        # Resolve the matched ERP item for extra columns
+        display_item = None
+        if sel.get('fabernr') and str_idx in matches:
+            suggestions = matches[str_idx].get('suggestions', [])
+            display_item = next((s for s in suggestions if s.get('FaberNr') == sel['fabernr']), None)
+        if not display_item and str_idx in matches:
+            display_item = matches[str_idx].get('auto_selected')
+
         # Write FaberNr
         fabernr_col = len(headers) + 1
         fabernr_cell = ws.cell(row=excel_row, column=fabernr_col, value=fabernr)
 
+        # Write F Omschrijving, F Manufacturer, F MPN
+        ws.cell(row=excel_row, column=fabernr_col + 1, value=display_item.get('Omschrijving', '') if display_item else '')
+        ws.cell(row=excel_row, column=fabernr_col + 2, value=display_item.get('Manufacturer', '') if display_item else '')
+        ws.cell(row=excel_row, column=fabernr_col + 3, value=display_item.get('MPN', '') if display_item else '')
+
         # Write MPNfree
-        mpnfree_col = len(headers) + 2
+        mpnfree_col = len(headers) + 5
         mpnfree_cell = ws.cell(row=excel_row, column=mpnfree_col, value=is_mpnfree)
 
         # Apply color coding

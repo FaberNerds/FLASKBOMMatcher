@@ -7,6 +7,10 @@ const standardColumns = ['Manufacturer', 'MPN', 'Description', 'Quantity', 'Refd
 let currentHeaders = [];
 let currentRows = [];
 
+// Customer selection state
+let allKlanten = [];
+let selectedKlantNr = '';
+
 // Row selection state
 let selectedHeaderRow = 0;    // 0-indexed row used as header
 let rowRange = { start: null, end: null };  // 0-indexed data row range (after header)
@@ -97,6 +101,8 @@ async function uploadFile(file) {
         renderMapping();
         document.getElementById('previewSection').style.display = 'block';
         document.getElementById('mappingSection').style.display = 'block';
+        const customerSection = document.getElementById('customerSection');
+        if (customerSection) customerSection.style.display = 'block';
         document.getElementById('processSection').style.display = 'block';
 
         toast.success(`Uploaded ${data.filename}`);
@@ -398,6 +404,94 @@ function autoMatch(standardCol, headerCol) {
 }
 
 // ========================================================================
+// Customer Selector
+// ========================================================================
+
+async function loadKlanten() {
+    try {
+        const data = await apiCall('/api/klanten', { method: 'GET' });
+        allKlanten = data.klanten || [];
+    } catch (e) {
+        allKlanten = [];
+    }
+}
+
+function initCustomerSelector() {
+    const searchInput = document.getElementById('customerSearch');
+    const dropdown = document.getElementById('customerDropdown');
+    if (!searchInput || !dropdown) return;
+
+    searchInput.addEventListener('input', () => {
+        const query = searchInput.value.trim().toLowerCase();
+        if (query.length < 1) {
+            dropdown.style.display = 'none';
+            return;
+        }
+        const filtered = allKlanten.filter(k =>
+            k.klant_nr.toLowerCase().includes(query) ||
+            k.klant_naam.toLowerCase().includes(query)
+        ).slice(0, 30);
+
+        if (filtered.length === 0) {
+            dropdown.style.display = 'none';
+            return;
+        }
+
+        dropdown.innerHTML = filtered.map(k =>
+            `<div class="customer-dropdown-item" data-klant-nr="${escapeHtml(k.klant_nr)}">` +
+            `<span class="klant-nr">${escapeHtml(k.klant_nr)}</span>` +
+            `<span class="klant-naam">${escapeHtml(k.klant_naam)}</span>` +
+            `</div>`
+        ).join('');
+        dropdown.style.display = 'block';
+
+        dropdown.querySelectorAll('.customer-dropdown-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const nr = item.dataset.klantNr;
+                const naam = allKlanten.find(k => k.klant_nr === nr)?.klant_naam || '';
+                selectCustomer(nr, naam);
+            });
+        });
+    });
+
+    searchInput.addEventListener('blur', () => {
+        // Delay to allow click on dropdown item
+        setTimeout(() => { dropdown.style.display = 'none'; }, 200);
+    });
+
+    searchInput.addEventListener('focus', () => {
+        if (searchInput.value.trim().length >= 1) {
+            searchInput.dispatchEvent(new Event('input'));
+        }
+    });
+}
+
+function selectCustomer(klantNr, klantNaam) {
+    selectedKlantNr = klantNr;
+    const searchInput = document.getElementById('customerSearch');
+    const dropdown = document.getElementById('customerDropdown');
+    const selectedDiv = document.getElementById('selectedCustomer');
+    const selectedText = document.getElementById('selectedCustomerText');
+
+    if (searchInput) searchInput.value = '';
+    if (dropdown) dropdown.style.display = 'none';
+    if (selectedText) selectedText.textContent = `${klantNr} — ${klantNaam}`;
+    if (selectedDiv) selectedDiv.style.display = 'inline-flex';
+
+    toast.success(`Customer selected: ${klantNaam}`);
+}
+
+function clearCustomerSelection() {
+    selectedKlantNr = '';
+    const selectedDiv = document.getElementById('selectedCustomer');
+    if (selectedDiv) selectedDiv.style.display = 'none';
+    toast.info('Customer selection cleared');
+}
+
+// Load customer list on page load
+loadKlanten().then(() => initCustomerSelector());
+
+// ========================================================================
 // Process BOM
 // ========================================================================
 
@@ -427,7 +521,7 @@ async function processBom() {
 
         await apiCall('/api/set-mapping', {
             method: 'POST',
-            body: JSON.stringify({ mapping })
+            body: JSON.stringify({ mapping, klant_nr: selectedKlantNr })
         });
         window.location.href = '/process';
     } catch (e) {

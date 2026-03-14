@@ -95,3 +95,59 @@ def search_with_variants(
 
     logger.info(f"'{mpn}' → {len(results)} unique results ({len(variants)} variants tried)")
     return results
+
+
+def search_with_variants_batched(
+    mpn: str,
+    batch_search_fn: Callable[[List[str]], List[Dict[str, Any]]]
+) -> List[Dict[str, Any]]:
+    """
+    Search all MPN variants in a single batched query, then deduplicate and rank.
+
+    Unlike search_with_variants which makes one DB call per variant,
+    this calls batch_search_fn once with all variants, then post-processes
+    to rank results by variant specificity (exact match first).
+    """
+    variants = generate_mpn_variants(mpn)
+    if not variants:
+        return []
+
+    logger.debug(f"MPN batched variants for '{mpn}': {variants}")
+
+    try:
+        all_hits = batch_search_fn(variants)
+    except Exception as e:
+        logger.warning(f"Batched variant search failed for '{mpn}': {e}")
+        return []
+
+    # Deduplicate by FaberNr and tag with variant/exact_match info
+    mpn_upper = mpn.upper()
+    seen_fabernr = set()
+    results = []
+
+    for hit in all_hits:
+        fnr = hit.get('FaberNr', '')
+        if not fnr or fnr in seen_fabernr:
+            continue
+        seen_fabernr.add(fnr)
+
+        # Determine which variant matched this hit
+        hit_mpn = (hit.get('MPN', '') or '').upper()
+        matched_variant = mpn  # default
+        is_exact = False
+        for variant in variants:
+            if variant.upper() in hit_mpn:
+                matched_variant = variant
+                if variant.upper() == mpn_upper:
+                    is_exact = True
+                break
+
+        hit['_search_variant'] = matched_variant
+        hit['_exact_match'] = is_exact
+        results.append(hit)
+
+    # Sort: exact matches first, then by original result order
+    results.sort(key=lambda r: (not r.get('_exact_match', False),))
+
+    logger.info(f"'{mpn}' → {len(results)} unique results (batched, {len(variants)} variants)")
+    return results

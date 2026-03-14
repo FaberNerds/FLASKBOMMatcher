@@ -38,6 +38,21 @@ CATEGORY_WEIGHTS: Dict[str, Dict[str, int]] = {
 # Numeric parameter names (scored with log-ratio, not exact match)
 NUMERIC_PARAMS = {"value", "capacitance", "inductance", "voltage", "power", "impedance"}
 
+# Categories where higher voltage is acceptable (candidate_voltage >= query_voltage → 100%)
+VOLTAGE_UP_OK = {"CONDENSATOREN", "ELCO'S EN TANTALEN"}
+# Categories where tighter tolerance is acceptable (candidate_tol <= query_tol → 100%)
+TOLERANCE_DOWN_OK = {"CONDENSATOREN", "ELCO'S EN TANTALEN", "WEERSTANDEN"}
+# Categories where higher power is acceptable (candidate_power >= query_power → 100%)
+POWER_UP_OK = {"WEERSTANDEN"}
+
+# Params that allow directional substitution per category.
+# All other params → exact match only (100% or 0%, no partial credit).
+SUBSTITUTABLE_PARAMS = {
+    "CONDENSATOREN":       {"voltage", "tolerance"},
+    "ELCO'S EN TANTALEN":  {"voltage", "tolerance"},
+    "WEERSTANDEN":         {"tolerance", "power"},
+}
+
 
 # ===========================================================================
 # Value normalizers
@@ -223,7 +238,7 @@ def _parse_package_from_desc(desc: str) -> Optional[str]:
                   r'TSSOP[- ]?\d+|SSOP[- ]?\d+|MSOP[- ]?\d+|DIP[- ]?\d+|PDIP[- ]?\d+|'
                   r'DPAK|D2PAK|TO[- ]?\d+[A-Z]*|BGA[- ]?\d+|LQFP[- ]?\d+|'
                   r'PLCC[- ]?\d+|SOD[- ]?\d+[A-Z]*|DO[- ]?\d+[A-Z]*|'
-                  r'SMA|SMB|SMC)\b', desc, re.IGNORECASE)
+                  r'SMA|SMB|SMC|MELF)\b', desc, re.IGNORECASE)
     if m:
         return m.group(1)
     return None
@@ -239,20 +254,31 @@ def parse_weerstanden(desc: str) -> Dict[str, str]:
     d = re.sub(r'^(RES|WEERSTAND)\s+', '', desc.strip(), flags=re.IGNORECASE)
 
     # Value: look for resistance notation
-    # Patterns: 8E2, 4R7, 0R47, 100R, 10k, 1k54, 1M, 2,2k, 820R, 1.5k
+    # Patterns: 8E2, 4R7, 0R47, 100R, 10k, 1k54, 1M, 2,2k, 820R, 1.5k, 191E, 47E
     m = re.search(r'\b(\d+E\d+|\d+[Rr]\d*|\d+(?:[.,]\d+)?[kKmM](?:\d+)?|\d+(?:[.,]\d+)?(?=[Ωo\s]))', d)
     if m:
         params["value"] = m.group(1)
+    else:
+        # ERP format: 191E, 47E, 825E (value in ohms with trailing E, no decimal digits)
+        m = re.search(r'\b(\d+)E\b', d)
+        if m:
+            params["value"] = m.group(1) + "R"  # Convert to standard R-notation (191R = 191Ω)
 
     # Tolerance
     tol = _parse_tolerance(d)
     if tol:
         params["tolerance"] = tol
 
-    # Power rating: 0.125W, 0.25W, 0.5W, 1W, etc.
-    m = re.search(r'(\d+(?:[.,]\d+)?)\s*[Ww]', d)
+    # Power rating: 0.125W, 0.25W, 0.5W, 1W, 50mW, 100mW, etc.
+    m = re.search(r'(\d+(?:[.,]\d+)?)\s*mW', d, re.IGNORECASE)
     if m:
-        params["power"] = _european_decimal(m.group(1)) + "W"
+        # Convert milliwatts to watts
+        mw_val = float(_european_decimal(m.group(1)))
+        params["power"] = f"{mw_val / 1000.0}W"
+    else:
+        m = re.search(r'(\d+(?:[.,]\d+)?)\s*[Ww]', d)
+        if m:
+            params["power"] = _european_decimal(m.group(1)) + "W"
 
     # Package
     pkg = _parse_package_from_desc(d)
@@ -269,15 +295,37 @@ def parse_condensatoren(desc: str) -> Dict[str, str]:
         return params
     d = desc.strip()
 
-    # Dielectric type
-    m = re.search(r'\b(X7R|X5R|X8R|C0G|NP0|NPO|Y5V|X7S|X6S|U2J)\b', d, re.IGNORECASE)
+    # Dielectric type: standard ceramic codes + film types
+    m = re.search(r'\b(X7R|X5R|X8R|X8L|C0G|COG|NP0|NPO|Y5V|X7S|X6S|U2J|MKT|MKP|MKS|PPS|KER|Z5U)\b', d, re.IGNORECASE)
     if m:
-        params["dielectric"] = m.group(1).upper()
+        val = m.group(1).upper()
+        # Normalize aliases
+        if val == "COG":
+            val = "C0G"
+        elif val == "NPO":
+            val = "NP0"
+        params["dielectric"] = val
 
-    # Capacitance: 100nF, 10uF, 4,7pF, 1µF
+    # Capacitance: 100nF, 10uF, 4,7pF, 1µF (with F suffix)
     m = re.search(r'(\d+(?:[.,]\d+)?)\s*([pnuµPNUµ])[Ff]', d)
     if m:
         params["capacitance"] = _european_decimal(m.group(1)) + m.group(2).lower() + "F"
+    else:
+        # ERP shorthand without F: 100N=100nF, 3N3=3.3nF, 6N8=6.8nF, 1U=1µF, 100P=100pF
+        # Pattern: digits + multiplier-as-decimal + digits (e.g. 3N3, 6P8, 2U2)
+        m = re.search(r'\b(\d+)([NnPpUu])(\d+)\b', d)
+        if m:
+            val = f"{m.group(1)}.{m.group(3)}"
+            prefix = m.group(2).lower()
+            prefix_map = {'n': 'n', 'p': 'p', 'u': 'u'}
+            params["capacitance"] = val + prefix_map.get(prefix, prefix) + "F"
+        else:
+            # Plain: 100N, 1U, 470P (digits + single multiplier, no trailing digits)
+            m = re.search(r'\b(\d+(?:[.,]\d+)?)([NnPpUu])\b', d)
+            if m:
+                prefix = m.group(2).lower()
+                prefix_map = {'n': 'n', 'p': 'p', 'u': 'u'}
+                params["capacitance"] = _european_decimal(m.group(1)) + prefix_map.get(prefix, prefix) + "F"
 
     # Tolerance
     tol = _parse_tolerance(d)
@@ -845,7 +893,7 @@ class CategoryIndex:
         results = []
         for ic in item_codes:
             candidate_params = item_params.get(ic, {})
-            score, matched = self._compute_score(params, candidate_params, weights)
+            score, matched = self._compute_score(params, candidate_params, weights, category)
             if score > 0:
                 results.append({
                     "item_code": ic,
@@ -866,8 +914,14 @@ class CategoryIndex:
         query_params: Dict[str, str],
         candidate_params: Dict[str, str],
         weights: Dict[str, int],
+        category: str = "",
     ) -> Tuple[float, Dict[str, Tuple]]:
         """Compute a weighted similarity score (0-100) between query and candidate params.
+
+        Strict substitution rules per category:
+        - Capacitors/Elcos: voltage ≥ and tolerance ≤ may differ; all others must match exactly
+        - Resistors: tolerance ≤ and power ≥ may differ; all others must match exactly
+        - Other categories: log-ratio scoring for numeric params, exact match for strings
 
         Returns (score, matched_params) where matched_params maps
         param_name → (query_value, candidate_value).
@@ -878,6 +932,7 @@ class CategoryIndex:
 
         weighted_sum = 0.0
         matched: Dict[str, Tuple] = {}
+        substitutable = SUBSTITUTABLE_PARAMS.get(category, set())
 
         for pname, qval in query_params.items():
             w = weights.get(pname, 0)
@@ -890,22 +945,60 @@ class CategoryIndex:
 
             matched[pname] = (qval, cval)
 
-            if pname in NUMERIC_PARAMS:
-                # Numeric comparison via normalizers
-                qnum = _to_numeric(pname, qval)
-                cnum = _to_numeric(pname, cval)
-                if qnum is not None and cnum is not None and qnum > 0 and cnum > 0:
-                    try:
-                        ratio_diff = abs(math.log10(qnum / cnum))
-                    except (ValueError, ZeroDivisionError):
-                        ratio_diff = 10
-                    param_score = max(0.0, 100.0 - ratio_diff * 50.0)
+            if substitutable and pname in substitutable:
+                # --- Substitution-allowed params: directional rules ---
+                if pname == "voltage" and category in VOLTAGE_UP_OK:
+                    qnum = _to_numeric(pname, qval)
+                    cnum = _to_numeric(pname, cval)
+                    if qnum and cnum and cnum >= qnum:
+                        param_score = 100.0
+                    else:
+                        param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
+                elif pname == "tolerance" and category in TOLERANCE_DOWN_OK:
+                    qtol = _parse_tolerance_pct(qval)
+                    ctol = _parse_tolerance_pct(cval)
+                    if qtol is not None and ctol is not None and ctol <= qtol:
+                        param_score = 100.0
+                    else:
+                        param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
+                elif pname == "power" and category in POWER_UP_OK:
+                    qnum = _to_numeric(pname, qval)
+                    cnum = _to_numeric(pname, cval)
+                    if qnum and cnum and cnum >= qnum:
+                        param_score = 100.0
+                    else:
+                        param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
                 else:
-                    # Fall back to string comparison
                     param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
+
+            elif substitutable:
+                # --- Must-match params (category has substitution rules) ---
+                # Binary: exact match = 100%, any mismatch = 0%
+                if pname in NUMERIC_PARAMS:
+                    qnum = _to_numeric(pname, qval)
+                    cnum = _to_numeric(pname, cval)
+                    if qnum is not None and cnum is not None and max(qnum, cnum) > 0:
+                        param_score = 100.0 if abs(qnum - cnum) / max(qnum, cnum) < 0.01 else 0.0
+                    else:
+                        param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
+                else:
+                    param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
+
             else:
-                # String comparison (package, dielectric, etc.)
-                param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
+                # --- Categories without substitution rules: graduated scoring ---
+                if pname in NUMERIC_PARAMS:
+                    qnum = _to_numeric(pname, qval)
+                    cnum = _to_numeric(pname, cval)
+                    if qnum is not None and cnum is not None and qnum > 0 and cnum > 0:
+                        try:
+                            ratio_diff = abs(math.log10(qnum / cnum))
+                        except (ValueError, ZeroDivisionError):
+                            ratio_diff = 10
+                        param_score = max(0.0, 100.0 - ratio_diff * 50.0)
+                    else:
+                        param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
+                else:
+                    param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
 
             weighted_sum += param_score * w
 
@@ -954,6 +1047,17 @@ class CategoryIndex:
 def _norm_str(s: str) -> str:
     """Normalize a string for comparison: uppercase, strip dashes/spaces."""
     return re.sub(r'[-\s]', '', s.strip().upper())
+
+
+def _parse_tolerance_pct(val: str) -> Optional[float]:
+    """Extract numeric percentage from a tolerance string like '5%', '0.1%', '10%'."""
+    m = re.search(r'(\d+(?:[.,]\d+)?)', val)
+    if m:
+        try:
+            return float(_european_decimal(m.group(1)))
+        except ValueError:
+            return None
+    return None
 
 
 def _to_numeric(param_name: str, value_str: str) -> Optional[float]:

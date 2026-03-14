@@ -12,6 +12,7 @@ from services.file_service import allowed_file, read_file, get_sheet_names, get_
 from services.session_service import (
     get_session_id, save_bom_data, load_bom_data
 )
+from services.klant_cache_service import get_all_klanten
 
 logger = logging.getLogger(__name__)
 
@@ -122,17 +123,30 @@ def reload_file():
         return jsonify({'error': f'Failed to reload: {str(e)}'}), 400
 
 
+@upload_bp.route('/klanten', methods=['GET'])
+def list_klanten():
+    """Return all customers (KlantNr/KlantNaam) for the customer selector."""
+    try:
+        klanten = get_all_klanten()
+        return jsonify({'klanten': klanten})
+    except Exception as e:
+        logger.error(f"Error loading klanten: {e}")
+        return jsonify({'error': f'Failed to load customers: {str(e)}'}), 500
+
+
 @upload_bp.route('/set-mapping', methods=['POST'])
 def set_mapping():
-    """Save column mapping."""
+    """Save column mapping and optional customer selection."""
     bom_data = load_bom_data()
     if not bom_data:
         return jsonify({'error': 'No file uploaded'}), 400
 
     data = request.get_json()
     mapping = data.get('mapping', {})
+    klant_nr = data.get('klant_nr', '')
 
     bom_data['column_mapping'] = mapping
+    bom_data['klant_nr'] = klant_nr
     save_bom_data(bom_data)
 
     return jsonify({'success': True})

@@ -46,10 +46,12 @@ _PAT_HERTZ = re.compile(r'\d+(?:\.\d+)?\s*[kKMG]?Hz', re.IGNORECASE)
 
 # Priority 2: Prefix keywords
 _PREFIX_RULES = [
-    (re.compile(r'^RES\b', re.IGNORECASE), "WEERSTANDEN"),
+    (re.compile(r'^RES(?:\b|\d)', re.IGNORECASE), "WEERSTANDEN"),
     (re.compile(r'^WEERSTAND', re.IGNORECASE), "WEERSTANDEN"),
     (re.compile(r'^CAP\b', re.IGNORECASE), "CONDENSATOREN"),
     (re.compile(r'^COND', re.IGNORECASE), "CONDENSATOREN"),
+    (re.compile(r'^CER(?:\b|\d)', re.IGNORECASE), "CONDENSATOREN"),
+    (re.compile(r'^SMD\d', re.IGNORECASE), "CONDENSATOREN"),
     (re.compile(r'^IC\b', re.IGNORECASE), "INTEGRATED CIRCUITS"),
     (re.compile(r'^CONN\b', re.IGNORECASE), "CONNECTOREN/PLUGGEN"),
     (re.compile(r'^PLUG', re.IGNORECASE), "CONNECTOREN/PLUGGEN"),

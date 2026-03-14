@@ -28,81 +28,6 @@
         </div>
     </div>
 
-    <!-- AI Provider -->
-    <div class="card" style="margin-bottom: 20px;">
-        <div class="card-header">
-            <h3 class="card-title">AI Provider</h3>
-        </div>
-        <div class="card-body">
-            <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                    <input type="radio" name="aiProvider" value="mistral" id="providerMistral">
-                    Mistral
-                </label>
-                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                    <input type="radio" name="aiProvider" value="openrouter" id="providerOpenrouter">
-                    OpenRouter (fallback)
-                </label>
-                <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
-                    <input type="radio" name="aiProvider" value="ollama" id="providerOllama">
-                    Ollama (local)
-                </label>
-            </div>
-        </div>
-    </div>
-
-    <!-- Mistral API Key -->
-    <div class="card" style="margin-bottom: 20px;">
-        <div class="card-header">
-            <h3 class="card-title">Mistral API Key</h3>
-        </div>
-        <div class="card-body">
-            <div style="display: flex; gap: 8px;">
-                <input type="password" class="form-input" id="mistralKey" placeholder="Enter Mistral API key"
-                       style="flex: 1;">
-                <button class="btn btn-primary" onclick="saveMistralKey()">Save</button>
-            </div>
-            <p id="mistralStatus" style="font-size: 12px; color: var(--text-muted); margin-top: 8px;"></p>
-        </div>
-    </div>
-
-    <!-- OpenRouter API Key -->
-    <div class="card" style="margin-bottom: 20px;">
-        <div class="card-header">
-            <h3 class="card-title">OpenRouter API Key</h3>
-        </div>
-        <div class="card-body">
-            <div style="display: flex; gap: 8px;">
-                <input type="password" class="form-input" id="openrouterKey" placeholder="Enter OpenRouter API key"
-                       style="flex: 1;">
-                <button class="btn btn-primary" onclick="saveOpenrouterKey()">Save</button>
-            </div>
-            <p id="openrouterStatus" style="font-size: 12px; color: var(--text-muted); margin-top: 8px;"></p>
-        </div>
-    </div>
-
-    <!-- Ollama Settings -->
-    <div class="card" style="margin-bottom: 20px;">
-        <div class="card-header">
-            <h3 class="card-title">Ollama Settings</h3>
-            <p class="card-subtitle">Local AI — no API key needed</p>
-        </div>
-        <div class="card-body">
-            <div style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px; font-weight: 500; margin-bottom: 4px; display: block;">Host URL</label>
-                <input type="text" class="form-input" id="ollamaHost"
-                       placeholder="http://DESKTOP-DANIELCLEAVER:11434" style="width: 100%;">
-            </div>
-            <div style="margin-bottom: 12px;">
-                <label class="form-label" style="font-size: 13px; font-weight: 500; margin-bottom: 4px; display: block;">Model</label>
-                <input type="text" class="form-input" id="ollamaModel"
-                       placeholder="qwen3.5:9b" style="width: 100%;">
-            </div>
-            <button class="btn btn-primary" onclick="saveOllamaSettings()">Save</button>
-            <p id="ollamaStatus" style="font-size: 12px; color: var(--text-muted); margin-top: 8px;"></p>
-        </div>
-    </div>
-
     <!-- Parameter Index -->
     <div class="card" style="margin-bottom: 20px;">
         <div class="card-header">
@@ -119,73 +44,11 @@
             <span id="rebuildResult" style="margin-left: 12px; font-size: 13px;"></span>
         </div>
     </div>
-
-    <!-- ERP Description Examples -->
-    <div class="card" style="margin-bottom: 20px;">
-        <div class="card-header">
-            <h3 class="card-title">ERP Description Examples</h3>
-            <p class="card-subtitle">Paste example descriptions from Exact so the AI knows the format</p>
-        </div>
-        <div class="card-body">
-            <textarea class="form-input" id="erpExamples" rows="6"
-                      placeholder="RES 10K 1% 0,125W 0805&#10;CAP 100NF 50V X7R 0402&#10;IC REG LIN 3.3V 500MA SOT223"
-                      style="width: 100%; font-family: var(--font-family-mono); font-size: 12px;"></textarea>
-            <button class="btn btn-primary" onclick="saveErpExamples()" style="margin-top: 8px;">Save Examples</button>
-        </div>
-    </div>
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
-    // Load current settings on page load
-    async function loadSettings() {
-        try {
-            const [mistral, openrouter, ollama, provider, examples] = await Promise.all([
-                apiCall('/api/settings/mistral'),
-                apiCall('/api/settings/openrouter'),
-                apiCall('/api/settings/ollama'),
-                apiCall('/api/settings/ai-provider'),
-                apiCall('/api/settings/erp-examples')
-            ]);
-
-            // Mistral
-            if (mistral.configured) {
-                document.getElementById('mistralStatus').textContent = `Configured: ${mistral.masked_key}`;
-            } else {
-                document.getElementById('mistralStatus').textContent = 'Not configured';
-            }
-
-            // OpenRouter
-            if (openrouter.configured) {
-                document.getElementById('openrouterStatus').textContent = `Configured: ${openrouter.masked_key}`;
-            } else {
-                document.getElementById('openrouterStatus').textContent = 'Not configured';
-            }
-
-            // Ollama
-            document.getElementById('ollamaHost').placeholder = ollama.host;
-            document.getElementById('ollamaModel').placeholder = ollama.model;
-            document.getElementById('ollamaStatus').textContent = `Host: ${ollama.host}, Model: ${ollama.model}`;
-
-            // Provider
-            if (provider.provider === 'openrouter') {
-                document.getElementById('providerOpenrouter').checked = true;
-            } else if (provider.provider === 'ollama') {
-                document.getElementById('providerOllama').checked = true;
-            } else {
-                document.getElementById('providerMistral').checked = true;
-            }
-
-            // ERP examples
-            if (examples.examples) {
-                document.getElementById('erpExamples').value = examples.examples;
-            }
-        } catch (e) {
-            console.error('Failed to load settings:', e);
-        }
-    }
-
     async function testConnection() {
         const btn = document.getElementById('testConnectionBtn');
         const result = document.getElementById('connectionResult');
@@ -196,85 +59,18 @@
         try {
             const data = await apiCall('/api/settings/test-connection', { method: 'POST' });
             if (data.success) {
-                result.textContent = '✓ ' + data.message;
+                result.textContent = '\u2713 ' + data.message;
                 result.style.color = 'var(--color-success)';
             } else {
-                result.textContent = '✕ ' + data.message;
+                result.textContent = '\u2715 ' + data.message;
                 result.style.color = 'var(--color-danger)';
             }
         } catch (e) {
-            result.textContent = '✕ ' + e.message;
+            result.textContent = '\u2715 ' + e.message;
             result.style.color = 'var(--color-danger)';
         }
         btn.disabled = false;
     }
-
-    async function saveMistralKey() {
-        const key = document.getElementById('mistralKey').value.trim();
-        if (!key) return toast.warning('Enter an API key');
-        try {
-            const data = await apiCall('/api/settings/mistral', {
-                method: 'POST',
-                body: JSON.stringify({ api_key: key })
-            });
-            document.getElementById('mistralStatus').textContent = `Configured: ${data.masked_key}`;
-            document.getElementById('mistralKey').value = '';
-            toast.success('Mistral API key saved');
-        } catch (e) { /* toast already shown */ }
-    }
-
-    async function saveOpenrouterKey() {
-        const key = document.getElementById('openrouterKey').value.trim();
-        if (!key) return toast.warning('Enter an API key');
-        try {
-            const data = await apiCall('/api/settings/openrouter', {
-                method: 'POST',
-                body: JSON.stringify({ api_key: key })
-            });
-            document.getElementById('openrouterStatus').textContent = `Configured: ${data.masked_key}`;
-            document.getElementById('openrouterKey').value = '';
-            toast.success('OpenRouter API key saved');
-        } catch (e) { /* toast already shown */ }
-    }
-
-    async function saveOllamaSettings() {
-        const host = document.getElementById('ollamaHost').value.trim();
-        const model = document.getElementById('ollamaModel').value.trim();
-        if (!host) return toast.warning('Enter Ollama host URL');
-        if (!model) return toast.warning('Enter model name');
-        try {
-            await apiCall('/api/settings/ollama', {
-                method: 'POST',
-                body: JSON.stringify({ host, model })
-            });
-            document.getElementById('ollamaStatus').textContent = `Host: ${host}, Model: ${model}`;
-            toast.success('Ollama settings saved');
-        } catch (e) { /* toast already shown */ }
-    }
-
-    async function saveErpExamples() {
-        const examples = document.getElementById('erpExamples').value;
-        try {
-            await apiCall('/api/settings/erp-examples', {
-                method: 'POST',
-                body: JSON.stringify({ examples })
-            });
-            toast.success('ERP examples saved');
-        } catch (e) { /* toast already shown */ }
-    }
-
-    // Provider radio change
-    document.querySelectorAll('input[name="aiProvider"]').forEach(radio => {
-        radio.addEventListener('change', async (e) => {
-            try {
-                await apiCall('/api/settings/ai-provider', {
-                    method: 'POST',
-                    body: JSON.stringify({ provider: e.target.value })
-                });
-                toast.success(`AI provider set to ${e.target.value}`);
-            } catch (e) { /* toast already shown */ }
-        });
-    });
 
     async function loadIndexStats() {
         try {
@@ -328,6 +124,5 @@
     }
 
     loadIndexStats();
-    loadSettings();
 </script>
 {% endblock %}

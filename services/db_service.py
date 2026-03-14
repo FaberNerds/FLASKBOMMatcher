@@ -7,6 +7,7 @@ import pyodbc
 import keyring
 import logging
 import threading
+import time
 from typing import Optional, Generator
 from contextlib import contextmanager
 from queue import Queue, Empty
@@ -25,9 +26,10 @@ CONNECTION_TIMEOUT = 15  # seconds
 
 # Connection pool settings
 POOL_MIN_SIZE = 2
-POOL_MAX_SIZE = 10
+POOL_MAX_SIZE = 6
 POOL_GET_TIMEOUT = 5       # seconds
 POOL_EXHAUSTED_WAIT = 30   # seconds
+POOL_HEALTH_CHECK_IDLE = 60  # seconds — only health-check connections idle longer than this
 
 # Keyring credentials (Windows Credential Manager)
 KEYRING_SERVICE = "Prod_SQL_DB_Luminovo"
@@ -61,11 +63,11 @@ class DatabaseConnectionPool:
         self._size = 0
         self._lock = threading.Lock()
 
-        # Pre-populate with minimum connections
+        # Pre-populate with minimum connections (stored as (conn, timestamp) tuples)
         for _ in range(min_size):
             conn = self._create_connection()
             if conn:
-                self._pool.put(conn)
+                self._pool.put((conn, time.time()))
                 self._size += 1
 
         self._initialized = True
@@ -88,6 +90,7 @@ class DatabaseConnectionPool:
                 f"TrustServerCertificate={'yes' if TRUST_SERVER_CERTIFICATE else 'no'};"
                 f"Encrypt={'yes' if ENCRYPT else 'no'};"
                 f"Connection Timeout={CONNECTION_TIMEOUT};"
+                f"MARS_Connection=yes;"
             )
 
             conn = pyodbc.connect(conn_str, timeout=CONNECTION_TIMEOUT)
@@ -102,10 +105,11 @@ class DatabaseConnectionPool:
         """Context manager: yields a connection, returns it to the pool after use."""
         conn = None
         try:
-            # Try to get from pool
+            # Try to get from pool (items are (conn, last_used_timestamp) tuples)
             try:
-                conn = self._pool.get(timeout=POOL_GET_TIMEOUT)
+                conn, last_used = self._pool.get(timeout=POOL_GET_TIMEOUT)
             except Empty:
+                last_used = 0
                 # Pool empty — create new if under max
                 with self._lock:
                     if self._size < self.max_size:
@@ -115,10 +119,10 @@ class DatabaseConnectionPool:
                             logger.info(f"Created new connection: {self._size}/{self.max_size}")
                     else:
                         logger.warning("Connection pool exhausted, waiting...")
-                        conn = self._pool.get(timeout=POOL_EXHAUSTED_WAIT)
+                        conn, last_used = self._pool.get(timeout=POOL_EXHAUSTED_WAIT)
 
-            # Verify connection is alive
-            if conn:
+            # Only health-check connections that have been idle > threshold
+            if conn and (time.time() - last_used) > POOL_HEALTH_CHECK_IDLE:
                 try:
                     cursor = conn.cursor()
                     cursor.execute("SELECT 1")
@@ -137,7 +141,7 @@ class DatabaseConnectionPool:
         finally:
             if conn:
                 try:
-                    self._pool.put_nowait(conn)
+                    self._pool.put_nowait((conn, time.time()))
                 except Exception:
                     try:
                         conn.close()

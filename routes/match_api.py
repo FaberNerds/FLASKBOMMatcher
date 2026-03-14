@@ -12,10 +12,7 @@ from services.session_service import (
 )
 from services.match_service import find_ipn_batch, find_ipn_single
 from services import search_service
-from services.ai_service import assess_mpnfree_batch
-from services.credential_service import (
-    get_mistral_api_key, get_openrouter_api_key, get_ai_provider
-)
+from services.ai_service import assess_mpnfree_batch_local
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +46,12 @@ def find_ipn():
         elif str_idx in mpnfree:
             mpnfree_flags[str_idx] = mpnfree[str_idx].get('mpnfree', False)
 
+    selected_klant_nr = bom_data.get('klant_nr', '')
     mpnfree_count = sum(1 for v in mpnfree_flags.values() if v)
-    logger.info(f"=== IPN SEARCH START === {len(rows)} rows, {mpnfree_count} MPNfree")
+    logger.info(f"=== IPN SEARCH START === {len(rows)} rows, {mpnfree_count} MPNfree, klant='{selected_klant_nr}'")
 
     try:
-        results = find_ipn_batch(rows, mapping, mpnfree_flags=mpnfree_flags)
+        results = find_ipn_batch(rows, mapping, mpnfree_flags=mpnfree_flags, selected_klant_nr=selected_klant_nr)
 
         # Convert to dict keyed by row index for storage
         matches_dict = {}
@@ -107,10 +105,11 @@ def find_ipn_single_route():
     elif str_idx in mpnfree:
         is_mpnfree = mpnfree[str_idx].get('mpnfree', False)
 
-    logger.info(f"Re-search row {row_index}, mpnfree={is_mpnfree}")
+    selected_klant_nr = bom_data.get('klant_nr', '')
+    logger.info(f"Re-search row {row_index}, mpnfree={is_mpnfree}, klant='{selected_klant_nr}'")
 
     try:
-        result = find_ipn_single(row_index, rows[row_index], mapping, is_mpnfree=is_mpnfree)
+        result = find_ipn_single(row_index, rows[row_index], mapping, is_mpnfree=is_mpnfree, selected_klant_nr=selected_klant_nr)
 
         logger.info(f"Row {row_index} result: {result['search_method']}, {result['confidence']}, {len(result['suggestions'])} suggestions")
 
@@ -178,7 +177,7 @@ def manual_search():
 
 @match_bp.route('/match/mpnfree', methods=['POST'])
 def assess_mpnfree():
-    """Batch MPNfree assessment using AI."""
+    """Batch MPNfree assessment using rule-based classification."""
     bom_data = load_bom_data()
     if not bom_data:
         return jsonify({'error': 'No BOM data loaded'}), 400
@@ -189,32 +188,21 @@ def assess_mpnfree():
     if not rows:
         return jsonify({'error': 'BOM has no rows'}), 400
 
-    # Get AI credentials
-    provider = get_ai_provider()
-    if provider == 'mistral':
-        api_key = get_mistral_api_key()
-    elif provider == 'ollama':
-        api_key = 'ollama-local'
-    else:
-        api_key = get_openrouter_api_key()
-    if not api_key:
-        return jsonify({'error': f'No API key configured for {provider}. Configure in Settings.'}), 400
-
     try:
         mpn_col = mapping.get('MPN', '')
         mfr_col = mapping.get('Manufacturer', '')
         desc_col = mapping.get('Description', '')
 
-        ai_input = []
+        input_rows = []
         for i, row in enumerate(rows):
-            ai_input.append({
+            input_rows.append({
                 'index': i,
                 'mpn': row.get(mpn_col, '') if mpn_col else '',
                 'manufacturer': row.get(mfr_col, '') if mfr_col else '',
                 'description': row.get(desc_col, '') if desc_col else ''
             })
 
-        results = assess_mpnfree_batch(ai_input, api_key, provider)
+        results = assess_mpnfree_batch_local(input_rows)
 
         # Store keyed by row index
         mpnfree_dict = {}

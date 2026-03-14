@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Shared regex helpers
 # ---------------------------------------------------------------------------
 
-_SMD_PACKAGES = r'\b(0201|0402|0603|0805|1206|1210|1812|2010|2512)\b'
+_SMD_PACKAGES = r'(?:\b|(?<=SMD)|(?<=CER)|(?<=RES)|(?<=CAP))(0201|0402|0603|0805|1206|1210|1812|2010|2512)\b'
 _TOLERANCE_RE = re.compile(r'[±]?\s*(\d+(?:[.,]\d+)?)\s*%', re.IGNORECASE)
 
 _THROUGH_HOLE_PACKAGES = re.compile(
@@ -422,10 +422,31 @@ def get_match_highlights(
             continue
         val_upper = value.upper()
         idx = erp_upper.find(val_upper)
+
+        # Comma/dot equivalence: try swapping , ↔ . if direct match fails
+        if idx == -1 and ('.' in val_upper or ',' in val_upper):
+            alt = val_upper.replace('.', ',') if '.' in val_upper else val_upper.replace(',', '.')
+            idx = erp_upper.find(alt)
+            if idx != -1:
+                # Use the length of the alt string (same length)
+                val_upper = alt
+
         if idx != -1:
+            start = idx
+            end = idx + len(val_upper)
+
+            # Expand package highlights to include prefix like SMD, CER, RES
+            if param == 'package' and start >= 3:
+                prefix = erp_upper[start - 3:start]
+                if prefix in ('SMD', 'CER', 'RES', 'CAP'):
+                    start -= 3
+                    # Also expand end to include trailing letter (e.g. "N" in SMD0603N)
+                    while end < len(erp_upper) and erp_upper[end].isalpha():
+                        end += 1
+
             highlights.append({
-                'start': idx,
-                'end': idx + len(val_upper),
+                'start': start,
+                'end': end,
                 'param': param,
                 'color': _PARAM_COLORS.get(param, 'gray'),
             })

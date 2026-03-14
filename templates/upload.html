@@ -80,6 +80,24 @@
             </div>
         </div>
 
+        <!-- Customer Selector -->
+        <div id="customerSection" style="display: none; margin-top: 24px;">
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Klant (Customer)</h3>
+            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
+                Select a customer to include customer-specific parts in matching. Leave empty for generic matching.
+            </p>
+            <div style="position: relative;">
+                <input type="text" id="customerSearch" class="form-input" placeholder="Search customer..."
+                       autocomplete="off" style="width: 100%; max-width: 400px;">
+                <div id="customerDropdown" class="customer-dropdown" style="display: none;">
+                </div>
+            </div>
+            <div id="selectedCustomer" style="display: none; margin-top: 8px; padding: 8px 12px; background: var(--color-success-light); border-radius: var(--radius-md); align-items: center; gap: 8px;">
+                <span id="selectedCustomerText"></span>
+                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="clearCustomerSelection()">✕</button>
+            </div>
+        </div>
+
         <!-- Process Button -->
         <div id="processSection" style="display: none; margin-top: 24px; text-align: right;">
             <button class="btn btn-primary btn-lg" id="processBtn" onclick="processBom()">

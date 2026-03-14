@@ -117,6 +117,13 @@ if not config.DEBUG_MODE:
     except ImportError:
         pass
 
+# Pre-load klant cache (KlantNr -> KlantNaam mapping)
+try:
+    from services.klant_cache_service import ensure_loaded as _load_klant_cache
+    _load_klant_cache()
+except Exception as e:
+    logger.warning(f"Could not pre-load klant cache: {e}")
+
 # Register all blueprints
 register_blueprints(app)
 

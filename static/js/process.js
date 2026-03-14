@@ -10,6 +10,12 @@ let mpnfreeResults = {};
 let selections = {};
 let selectedRow = null;
 let activeModal = null;
+let manualSearchMode = true;
+let modalSortColumn = null;
+let modalSortAsc = true;
+let modalSuggestions = [];
+let modalRowIndex = null;
+let descColumnWidth = null;
 
 // Column order for left table (customer BOM)
 const leftColumns = ['Description', 'MPN', 'Manufacturer', 'Quantity', 'Refdes'];
@@ -27,6 +33,7 @@ async function loadBomData() {
         document.getElementById('bomStats').textContent = `${data.total_rows} rows`;
         renderTables();
         setupSyncScroll();
+        window.addEventListener('resize', syncRowHeights);
     } catch (e) {
         toast.error('Failed to load BOM data. Go back and upload a file.');
     } finally {
@@ -83,7 +90,11 @@ function renderTables() {
     const leftHead = document.getElementById('leftTableHead');
     let lhHtml = '<tr><th style="width: 36px;">#</th>';
     for (const col of mappedCols) {
-        lhHtml += `<th>${escapeHtml(col.std)}</th>`;
+        if (col.std === 'Description') {
+            lhHtml += `<th class="resizable-th desc-th">${escapeHtml(col.std)}<div class="col-resize-handle" data-col="desc"></div></th>`;
+        } else {
+            lhHtml += `<th>${escapeHtml(col.std)}</th>`;
+        }
     }
     if (hasMpnfree) {
         lhHtml += '<th style="width: 80px;">MPNfree</th>';
@@ -93,7 +104,7 @@ function renderTables() {
 
     // --- Right Table Header ---
     const rightHead = document.getElementById('rightTableHead');
-    rightHead.innerHTML = '<tr><th>Faber IPN</th><th>Description</th><th>Manufacturer</th><th>MPN</th><th>Score</th></tr>';
+    rightHead.innerHTML = '<tr><th>FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>KlantNr</th><th>KlantNaam</th><th>Magazijn</th><th>Mounting</th><th>Type</th><th>Status</th><th>Kostprijs</th><th>Voorraad</th><th>Verbruik</th><th>InBestelling</th></tr>';
 
     // --- Build body rows ---
     let leftHtml = '';
@@ -141,7 +152,13 @@ function renderTables() {
         leftHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="selectRow(${i})">`;
         leftHtml += `<td style="color: var(--text-muted); font-size: 11px;">${i + 1}</td>`;
         for (const col of mappedCols) {
-            leftHtml += `<td title="${escapeHtml(row[col.actual] || '')}">${escapeHtml(row[col.actual] || '')}</td>`;
+            const cellValue = row[col.actual] || '';
+            // Highlight BOM description for MPNfree rows with parameterized match results
+            if (col.std === 'Description' && hasMpnfree && getMpnfreeValue(i) && match && match.auto_selected && match.auto_selected._bom_highlights && match.auto_selected._bom_highlights.length > 0) {
+                leftHtml += `<td class="desc-col" title="${escapeHtml(cellValue)}">${applyHighlights(cellValue, match.auto_selected._bom_highlights)}</td>`;
+            } else {
+                leftHtml += `<td${col.std === 'Description' ? ' class="desc-col"' : ''} title="${escapeHtml(cellValue)}">${escapeHtml(cellValue)}</td>`;
+            }
         }
         if (hasMpnfree) {
             leftHtml += `<td>${renderMpnfreeDropdown(i)}</td>`;
@@ -151,17 +168,35 @@ function renderTables() {
         // --- Right row ---
         rightHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="selectRow(${i})">`;
 
-        if (match && match.auto_selected) {
-            const auto = match.auto_selected;
+        // Determine which item to display: manually selected suggestion or auto_selected
+        let displayItem = null;
+        if (sel.fabernr && match && match.suggestions) {
+            displayItem = match.suggestions.find(s => s.FaberNr === sel.fabernr);
+        }
+        if (!displayItem && match && match.auto_selected) {
+            displayItem = match.auto_selected;
+        }
+
+        if (displayItem) {
+            const auto = displayItem;
             const descHtml = renderHighlightedDescription(auto, match);
 
             rightHtml += `<td style="font-family: var(--font-family-mono); font-size: 11px;">${escapeHtml(fabernr)}</td>`;
             rightHtml += `<td title="${escapeHtml(auto.Omschrijving || '')}">${descHtml}</td>`;
             rightHtml += `<td>${escapeHtml(auto.Manufacturer || '')}</td>`;
             rightHtml += `<td>${renderMpnHighlights(auto, match, row, mapping)}</td>`;
-            rightHtml += `<td>${renderScore(auto, match)}</td>`;
+            rightHtml += `<td>${escapeHtml(auto.KlantNr || '')}</td>`;
+            rightHtml += `<td>${escapeHtml(auto.KlantNaam || '')}</td>`;
+            rightHtml += `<td>${escapeHtml(auto.Magazijn || '')}</td>`;
+            rightHtml += `<td>${escapeHtml(auto.Mounting || '')}</td>`;
+            rightHtml += `<td>${escapeHtml(auto.Type || '')}</td>`;
+            rightHtml += `<td>${escapeHtml(auto.Status || '')}</td>`;
+            rightHtml += `<td>${auto.Kostprijs || 0}</td>`;
+            rightHtml += `<td>${auto.Voorraad || 0}</td>`;
+            rightHtml += `<td>${auto.Verbruik || 0}</td>`;
+            rightHtml += `<td>${auto.InBestelling || 0}</td>`;
         } else {
-            rightHtml += '<td>\u2014</td><td>\u2014</td><td></td><td></td><td></td>';
+            rightHtml += '<td>\u2014</td><td>\u2014</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>';
         }
 
         rightHtml += '</tr>';
@@ -172,6 +207,133 @@ function renderTables() {
 
     // Update summary badges
     updateSummaryBadges(matchedCount, partialCount, noMatchCount, paramCount);
+
+    // Sync row heights between left and right tables
+    syncRowHeights();
+
+    // Setup column resize handles
+    setupColumnResize();
+
+    // Restore description column width if previously resized
+    if (descColumnWidth) {
+        applyDescColumnWidth(descColumnWidth);
+    }
+}
+
+function applyDescColumnWidth(w) {
+    const px = w + 'px';
+    const leftTh = document.querySelector('#leftTableHead .desc-th');
+    if (leftTh) {
+        leftTh.style.width = px;
+        leftTh.style.minWidth = px;
+        leftTh.style.maxWidth = px;
+    }
+    document.querySelectorAll('#leftTableBody .desc-col').forEach(td => {
+        td.style.width = px;
+        td.style.minWidth = px;
+        td.style.maxWidth = px;
+    });
+    const rightTh = document.querySelector('#rightTableHead th:nth-child(2)');
+    if (rightTh) {
+        rightTh.style.width = px;
+        rightTh.style.minWidth = px;
+        rightTh.style.maxWidth = px;
+    }
+    document.querySelectorAll('#rightTableBody td:nth-child(2)').forEach(td => {
+        td.style.width = px;
+        td.style.minWidth = px;
+        td.style.maxWidth = px;
+    });
+}
+
+// ========================================================================
+// Sync Row Heights Between Tables
+// ========================================================================
+
+function syncRowHeights() {
+    const leftRows = document.querySelectorAll('#leftTableBody tr');
+    const rightRows = document.querySelectorAll('#rightTableBody tr');
+    const count = Math.min(leftRows.length, rightRows.length);
+
+    // Reset heights so natural heights can be measured
+    for (let i = 0; i < count; i++) {
+        leftRows[i].style.height = '';
+        rightRows[i].style.height = '';
+    }
+
+    // Set each pair to the max of the two
+    for (let i = 0; i < count; i++) {
+        const maxH = Math.max(leftRows[i].offsetHeight, rightRows[i].offsetHeight);
+        leftRows[i].style.height = maxH + 'px';
+        rightRows[i].style.height = maxH + 'px';
+    }
+
+    // Also sync header rows
+    const leftHeadRows = document.querySelectorAll('#leftTableHead tr');
+    const rightHeadRows = document.querySelectorAll('#rightTableHead tr');
+    if (leftHeadRows.length > 0 && rightHeadRows.length > 0) {
+        leftHeadRows[0].style.height = '';
+        rightHeadRows[0].style.height = '';
+        const maxHeaderH = Math.max(leftHeadRows[0].offsetHeight, rightHeadRows[0].offsetHeight);
+        leftHeadRows[0].style.height = maxHeaderH + 'px';
+        rightHeadRows[0].style.height = maxHeaderH + 'px';
+    }
+}
+
+// ========================================================================
+// Column Resize
+// ========================================================================
+
+function setupColumnResize() {
+    const handles = document.querySelectorAll('.col-resize-handle');
+    handles.forEach(handle => {
+        handle.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const th = handle.parentElement;
+            const startX = e.pageX;
+            const startWidth = th.offsetWidth;
+
+            handle.classList.add('active');
+
+            function onMouseMove(e) {
+                const newWidth = Math.max(60, startWidth + (e.pageX - startX));
+                descColumnWidth = newWidth;
+                th.style.width = newWidth + 'px';
+                th.style.minWidth = newWidth + 'px';
+                th.style.maxWidth = newWidth + 'px';
+                // Also update all desc-col cells in both tables
+                document.querySelectorAll('#leftTableBody .desc-col').forEach(td => {
+                    td.style.maxWidth = newWidth + 'px';
+                    td.style.minWidth = newWidth + 'px';
+                    td.style.width = newWidth + 'px';
+                });
+                // Sync right table Description column (2nd column)
+                const rightDescTh = document.querySelector('#rightTableHead th:nth-child(2)');
+                if (rightDescTh) {
+                    rightDescTh.style.width = newWidth + 'px';
+                    rightDescTh.style.minWidth = newWidth + 'px';
+                    rightDescTh.style.maxWidth = newWidth + 'px';
+                }
+                document.querySelectorAll('#rightTableBody td:nth-child(2)').forEach(td => {
+                    td.style.maxWidth = newWidth + 'px';
+                    td.style.minWidth = newWidth + 'px';
+                    td.style.width = newWidth + 'px';
+                });
+                syncRowHeights();
+            }
+
+            function onMouseUp() {
+                handle.classList.remove('active');
+                document.removeEventListener('mousemove', onMouseMove);
+                document.removeEventListener('mouseup', onMouseUp);
+            }
+
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+        });
+    });
 }
 
 // ========================================================================
@@ -346,14 +508,42 @@ function updateSummaryBadges(matched, partial, noMatch, param) {
 // Row Selection — Full-Screen Modal
 // ========================================================================
 
+function toggleManualSearch() {
+    manualSearchMode = !manualSearchMode;
+    const btn = document.getElementById('manualSearchBtn');
+    if (btn) {
+        btn.textContent = manualSearchMode ? 'Manual search: ON' : 'Manual search: OFF';
+        btn.className = manualSearchMode ? 'btn btn-primary' : 'btn btn-outline';
+    }
+}
+
 function selectRow(rowIndex) {
     selectedRow = rowIndex;
     renderTables();
-    showRowDetailModal(rowIndex);
+    scrollSelectedRowIntoView();
+    if (!manualSearchMode) {
+        showRowDetailModal(rowIndex);
+    }
+}
+
+function openSelectedRowModal() {
+    if (selectedRow !== null) {
+        showRowDetailModal(selectedRow);
+    }
+}
+
+function scrollSelectedRowIntoView() {
+    if (selectedRow === null) return;
+    const leftRow = document.querySelector(`#leftTableBody tr[data-row="${selectedRow}"]`);
+    if (leftRow) {
+        leftRow.scrollIntoView({ block: 'nearest' });
+    }
 }
 
 function showRowDetailModal(rowIndex) {
     if (!bomData) return;
+    modalSortColumn = null;
+    modalSortAsc = true;
 
     const mapping = bomData.column_mapping || {};
     const rows = bomData.rows || [];
@@ -377,9 +567,13 @@ function showRowDetailModal(rowIndex) {
     let leftHtml = '';
     for (const col of mappedCols) {
         const val = row[col.actual] || '';
+        const isClickable = col.std === 'Description' || col.std === 'MPN';
+        const clickAttr = isClickable
+            ? ` style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;" title="Click to copy to search box" onclick="document.getElementById('modalSearchQuery').value=this.textContent; document.getElementById('modalSearchType').value='${col.std === 'MPN' ? 'mpn' : 'description'}'"`
+            : '';
         leftHtml += `<div class="row-detail-field">
             <div class="row-detail-field-label">${escapeHtml(col.std)}</div>
-            <div class="row-detail-field-value">${escapeHtml(val)}</div>
+            <div class="row-detail-field-value"${clickAttr}>${escapeHtml(val)}</div>
         </div>`;
     }
 
@@ -429,7 +623,7 @@ function showRowDetailModal(rowIndex) {
                 <select class="form-select" id="modalSearchType">
                     <option value="mpn">MPN</option>
                     <option value="ipn">IPN</option>
-                    <option value="description">Description</option>
+                    <option value="description" selected>Description</option>
                 </select>
                 <input type="text" class="form-input" id="modalSearchQuery" placeholder="Search query..."
                        onkeydown="if(event.key==='Enter') manualSearch(${rowIndex})">
@@ -484,18 +678,74 @@ function showRowDetailModal(rowIndex) {
     }, 200);
 }
 
+const modalColumns = [
+    { key: 'FaberNr', label: 'FaberNr' },
+    { key: 'Omschrijving', label: 'Omschrijving' },
+    { key: 'Manufacturer', label: 'Manufacturer' },
+    { key: 'MPN', label: 'MPN' },
+    { key: 'KlantNr', label: 'KlantNr' },
+    { key: 'KlantNaam', label: 'KlantNaam' },
+    { key: 'Magazijn', label: 'Magazijn' },
+    { key: 'Mounting', label: 'Mounting' },
+    { key: 'Type', label: 'Type' },
+    { key: 'Status', label: 'Status' },
+    { key: 'Kostprijs', label: 'Kostprijs', numeric: true },
+    { key: 'Voorraad', label: 'Voorraad', numeric: true },
+    { key: 'Verbruik', label: 'Verbruik', numeric: true },
+    { key: 'InBestelling', label: 'InBestelling', numeric: true },
+];
+
+function sortModalTable(columnKey) {
+    if (modalSortColumn === columnKey) {
+        modalSortAsc = !modalSortAsc;
+    } else {
+        modalSortColumn = columnKey;
+        modalSortAsc = true;
+    }
+    const altBody = document.getElementById('modalAltBody');
+    if (altBody) {
+        altBody.innerHTML = buildAlternativesTable(modalSuggestions, modalRowIndex);
+    }
+}
+
 function buildAlternativesTable(suggestions, rowIndex) {
     if (!suggestions || suggestions.length === 0) {
         return '<div style="padding: 24px; text-align: center; color: var(--text-muted);">No matches found. Use manual search below.</div>';
     }
 
-    let html = '<table class="data-table"><thead><tr>';
-    html += '<th>FaberNr</th><th>Description</th><th>Manufacturer</th><th>MPN</th><th>Status</th><th>Stock</th><th>Score</th><th></th>';
-    html += '</tr></thead><tbody>';
+    // Store for sorting
+    modalSuggestions = suggestions;
+    modalRowIndex = rowIndex;
 
-    for (const s of suggestions) {
-        const score = s._similarity_score;
-        const scoreHtml = score !== undefined ? `${Math.round(score)}%` : '';
+    // Sort if a column is selected
+    let sorted = [...suggestions];
+    if (modalSortColumn) {
+        const colDef = modalColumns.find(c => c.key === modalSortColumn);
+        const isNumeric = colDef && colDef.numeric;
+        sorted.sort((a, b) => {
+            let va = a[modalSortColumn] || '';
+            let vb = b[modalSortColumn] || '';
+            if (isNumeric) {
+                va = parseFloat(va) || 0;
+                vb = parseFloat(vb) || 0;
+                return modalSortAsc ? va - vb : vb - va;
+            }
+            va = String(va).toLowerCase();
+            vb = String(vb).toLowerCase();
+            if (va < vb) return modalSortAsc ? -1 : 1;
+            if (va > vb) return modalSortAsc ? 1 : -1;
+            return 0;
+        });
+    }
+
+    let html = '<table class="data-table"><thead><tr>';
+    for (const col of modalColumns) {
+        const arrow = modalSortColumn === col.key ? (modalSortAsc ? ' \u25B2' : ' \u25BC') : '';
+        html += `<th style="cursor:pointer; user-select:none;" onclick="sortModalTable('${col.key}')">${col.label}${arrow}</th>`;
+    }
+    html += '<th></th></tr></thead><tbody>';
+
+    for (const s of sorted) {
         const descHtml = s._param_highlights && s._param_highlights.length > 0
             ? applyHighlights(s.Omschrijving || '', s._param_highlights)
             : escapeHtml(s.Omschrijving || '');
@@ -506,9 +756,16 @@ function buildAlternativesTable(suggestions, rowIndex) {
             <td title="${escapeHtml(s.Omschrijving || '')}">${descHtml}</td>
             <td>${escapeHtml(s.Manufacturer || '')}</td>
             <td>${escapeHtml(s.MPN || '')}</td>
+            <td>${escapeHtml(s.KlantNr || '')}</td>
+            <td>${escapeHtml(s.KlantNaam || '')}</td>
+            <td>${escapeHtml(s.Magazijn || '')}</td>
+            <td>${escapeHtml(s.Mounting || '')}</td>
+            <td>${escapeHtml(s.Type || '')}</td>
             <td>${escapeHtml(s.Status || '')}</td>
+            <td>${s.Kostprijs || 0}</td>
             <td>${s.Voorraad || 0}</td>
-            <td>${scoreHtml}</td>
+            <td>${s.Verbruik || 0}</td>
+            <td>${s.InBestelling || 0}</td>
             <td><button class="btn btn-primary btn-sm" onclick="selectFromModal(${rowIndex}, '${fabernr}')">Select</button></td>
         </tr>`;
     }
@@ -707,6 +964,58 @@ async function exportBom() {
         hideLoading();
     }
 }
+
+// ========================================================================
+// Keyboard Navigation
+// ========================================================================
+
+document.addEventListener('keydown', (e) => {
+    // Only handle arrow keys when no modal is open and manual search is on
+    if (activeModal) return;
+    if (!manualSearchMode) return;
+    if (!bomData || !bomData.rows) return;
+
+    const totalRows = bomData.rows.length;
+    if (totalRows === 0) return;
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (selectedRow === null) {
+            selectedRow = 0;
+        } else {
+            // Find next visible row
+            const leftRows = document.querySelectorAll('#leftTableBody tr');
+            let found = false;
+            for (let i = selectedRow + 1; i < totalRows; i++) {
+                const tr = leftRows[i];
+                if (tr && tr.style.display !== 'none') {
+                    selectedRow = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) return;
+        }
+        renderTables();
+        scrollSelectedRowIntoView();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (selectedRow === null) return;
+        const leftRows = document.querySelectorAll('#leftTableBody tr');
+        for (let i = selectedRow - 1; i >= 0; i--) {
+            const tr = leftRows[i];
+            if (tr && tr.style.display !== 'none') {
+                selectedRow = i;
+                renderTables();
+                scrollSelectedRowIntoView();
+                break;
+            }
+        }
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        openSelectedRowModal();
+    }
+});
 
 // ========================================================================
 // Init

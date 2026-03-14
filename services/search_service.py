@@ -3,11 +3,43 @@ BOM Matcher - Search Service
 Direct SQL queries against Exact Globe ERP for component search.
 """
 import logging
+import threading
+import time
 from typing import List, Dict, Any
 
 from services.db_service import get_connection_context
+from services.klant_cache_service import enrich_results as _enrich_klant
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Thread-safe TTL cache for search results
+# ---------------------------------------------------------------------------
+_search_cache: Dict[str, tuple] = {}  # key -> (results, timestamp)
+_cache_lock = threading.Lock()
+_CACHE_TTL = 120  # seconds
+
+
+def clear_search_cache():
+    """Clear the search cache (call at start of batch operations)."""
+    global _search_cache
+    with _cache_lock:
+        _search_cache = {}
+
+
+def _cache_get(key: str) -> List[Dict[str, Any]] | None:
+    """Get cached result if still valid."""
+    with _cache_lock:
+        entry = _search_cache.get(key)
+        if entry and time.time() - entry[1] < _CACHE_TTL:
+            return entry[0]
+    return None
+
+
+def _cache_set(key: str, results: List[Dict[str, Any]]):
+    """Store result in cache."""
+    with _cache_lock:
+        _search_cache[key] = (results, time.time())
 
 # ---------------------------------------------------------------------------
 # Shared SQL SELECT clause (used by all three search functions)
@@ -75,7 +107,7 @@ def search_by_mpn(mpn: str) -> List[Dict[str, Any]]:
             cursor.execute(query, [search_term])
             results = [_row_to_dict(row) for row in cursor.fetchall()]
             logger.info(f"MPN LIKE '%{mpn}%' → {len(results)} rows")
-            return results
+            return _enrich_klant(results)
         except Exception as e:
             logger.error(f"search_by_mpn error: {e}")
             return []
@@ -106,7 +138,7 @@ def search_by_description(terms: List[str]) -> List[Dict[str, Any]]:
             cursor.execute(query, params)
             results = [_row_to_dict(row) for row in cursor.fetchall()]
             logger.info(f"DESC {clean_terms} → {len(results)} rows")
-            return results
+            return _enrich_klant(results)
         except Exception as e:
             logger.error(f"search_by_description error: {e}")
             return []
@@ -129,7 +161,7 @@ def search_by_ipn(ipn: str) -> List[Dict[str, Any]]:
             cursor.execute(query, [search_term])
             results = [_row_to_dict(row) for row in cursor.fetchall()]
             logger.info(f"IPN LIKE '{ipn}%' → {len(results)} rows")
-            return results
+            return _enrich_klant(results)
         except Exception as e:
             logger.error(f"search_by_ipn error: {e}")
             return []
@@ -151,7 +183,7 @@ def search_by_item_codes(item_codes: List[str]) -> List[Dict[str, Any]]:
             cursor.execute(query, item_codes)
             results = [_row_to_dict(row) for row in cursor.fetchall()]
             logger.info(f"ItemCode batch ({len(item_codes)} codes) → {len(results)} rows")
-            return results
+            return _enrich_klant(results)
         except Exception as e:
             logger.error(f"search_by_item_codes error: {e}")
             return []
@@ -178,6 +210,55 @@ def search_by_mpn_and_manufacturer(mpn: str, manufacturer: str = "") -> List[Dic
         results = mfr_matches + others
 
     return results
+
+
+def search_by_mpn_variants(variants: List[str], manufacturer: str = "") -> List[Dict[str, Any]]:
+    """Search Exact by multiple MPN variants in a single query (OR logic).
+
+    Combines all variants into one SQL query instead of making separate calls.
+    Returns results with manufacturer boosting if manufacturer is provided.
+    """
+    if not variants:
+        return []
+
+    # Check cache
+    cache_key = f"mpn_variants:{'|'.join(v.upper() for v in variants)}:{manufacturer.upper()}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        logger.debug(f"Cache hit for MPN variants {variants}")
+        return cached
+
+    with get_connection_context() as conn:
+        if not conn:
+            logger.error("No database connection available for search_by_mpn_variants")
+            return []
+        try:
+            cursor = conn.cursor()
+            or_clauses = " OR ".join(["i.UserField_02 LIKE ?"] * len(variants))
+            query = _BASE_SELECT + f" WHERE ({or_clauses})"
+            params = [f"%{v}%" for v in variants]
+            logger.debug(f"SQL: WHERE ({' OR '.join(f'UserField_02 LIKE %{v}%' for v in variants)})")
+            cursor.execute(query, params)
+            results = _enrich_klant([_row_to_dict(row) for row in cursor.fetchall()])
+            logger.info(f"MPN variants {variants} → {len(results)} rows (1 query)")
+
+            # Boost manufacturer matches to top
+            if manufacturer and results:
+                mfr_upper = manufacturer.upper().strip()
+                mfr_matches = []
+                others = []
+                for r in results:
+                    if mfr_upper in (r.get('Manufacturer', '') or '').upper():
+                        mfr_matches.append(r)
+                    else:
+                        others.append(r)
+                results = mfr_matches + others
+
+            _cache_set(cache_key, results)
+            return results
+        except Exception as e:
+            logger.error(f"search_by_mpn_variants error: {e}")
+            return []
 
 
 def test_connection() -> tuple[bool, str]:

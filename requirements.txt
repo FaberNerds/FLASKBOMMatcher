@@ -18,7 +18,7 @@ keyring>=24.0.0
 # Encryption for credential storage (cross-platform)
 cryptography>=41.0.0
 
-# HTTP requests for AI APIs (Mistral, OpenRouter)
+# HTTP requests
 requests>=2.28.0
 
 # Security
