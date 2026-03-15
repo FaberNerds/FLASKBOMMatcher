@@ -234,6 +234,30 @@ def assess_mpnfree():
         return jsonify({'error': f'MPNfree assessment failed: {str(e)}'}), 500
 
 
+@match_bp.route('/match/mpnfree/clear', methods=['POST'])
+def clear_mpnfree():
+    """Clear all MPNfree data (AI assessments and user overrides)."""
+    from services.session_service import _get_path
+    session_id = get_session_id()
+
+    # Delete mpnfree file
+    path = _get_path(session_id, 'mpnfree')
+    if path.exists():
+        path.unlink()
+
+    # Strip mpnfree keys from selections
+    selections = load_selections() or {}
+    changed = False
+    for row_data in selections.values():
+        if 'mpnfree' in row_data:
+            del row_data['mpnfree']
+            changed = True
+    if changed:
+        save_selections(selections)
+
+    return jsonify({'success': True})
+
+
 @match_bp.route('/match/delete', methods=['POST'])
 def delete_match():
     """Delete match and selection for a row."""

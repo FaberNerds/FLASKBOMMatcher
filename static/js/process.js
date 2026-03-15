@@ -523,6 +523,13 @@ async function overrideMpnfree(rowIndex, value) {
 // ========================================================================
 
 async function selectMpnfree() {
+    // Toggle off if already showing
+    if (Object.keys(mpnfreeResults).length > 0) {
+        await apiCall('/api/match/mpnfree/clear', { method: 'POST' });
+        mpnfreeResults = {};
+        renderTables();
+        return;
+    }
     showLoading();
     try {
         const data = await apiCall('/api/match/mpnfree', {
@@ -689,9 +696,17 @@ async function deleteMatch(rowIndex) {
 }
 
 function selectRow(rowIndex) {
+    const prev = selectedRow;
     selectedRow = rowIndex;
-    renderTables();
-    scrollSelectedRowIntoView();
+
+    // Remove selection from previous row
+    if (prev !== null) {
+        document.querySelectorAll(`tr[data-row="${prev}"]`).forEach(tr => tr.classList.remove('row-selected'));
+    }
+    // Add selection to new row
+    document.querySelectorAll(`tr[data-row="${rowIndex}"]`).forEach(tr => tr.classList.add('row-selected'));
+
+    saveUiState();
 }
 
 function openSelectedRowModal() {
@@ -985,7 +1000,7 @@ function closeRowDetailModal() {
             }
             activeModal = null;
             document.body.style.overflow = '';
-        }, 300);
+        }, 200);
     }
 }
 
