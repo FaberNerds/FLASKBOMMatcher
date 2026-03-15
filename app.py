@@ -5,10 +5,33 @@ Matches BOM lines to parts in Exact Globe ERP system.
 Version: V1.0.0
 """
 import logging
+import os
+import sys
 from logging.handlers import RotatingFileHandler
 from flask import Flask, jsonify, request
 from routes import register_blueprints
 import config
+
+# ---- Service Imports (pywin32) ----
+# Windows Service support - graceful fallback for dev/Linux environments
+try:
+    import win32serviceutil
+    import win32service
+    import win32event
+    import servicemanager
+except ImportError:
+    win32serviceutil = None
+
+# ---- WSGI Server for Windows Service ----
+# Cheroot is CherryPy's production WSGI server with SSL support and graceful shutdown
+try:
+    from cheroot.wsgi import Server as WSGIServer
+    from cheroot.ssl.builtin import BuiltinSSLAdapter
+except ImportError:
+    WSGIServer = None
+    BuiltinSSLAdapter = None
+
+basedir = os.path.abspath(os.path.dirname(__file__))
 
 # Security imports (graceful fallback)
 try:
@@ -25,7 +48,6 @@ except ImportError:
     LIMITER_AVAILABLE = False
 
 # Configure logging
-import sys
 class _ShortNameFormatter(logging.Formatter):
     """Formatter that shortens logger names for readable terminal output."""
     def format(self, record):
@@ -48,8 +70,7 @@ root_logger.addHandler(stream_handler)
 
 if not config.DEBUG_MODE:
     # Production: also log to file
-    import os as _os
-    _log_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), 'server.log')
+    _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server.log')
     file_handler = RotatingFileHandler(_log_path, maxBytes=10*1024*1024, backupCount=5)
     file_handler.setFormatter(_ShortNameFormatter(log_format, datefmt=log_datefmt))
     file_handler.setLevel(logging.INFO)
@@ -68,7 +89,6 @@ except Exception as e:
 app.config['MAX_CONTENT_LENGTH'] = config.MAX_CONTENT_LENGTH
 app.config['UPLOAD_FOLDER'] = str(config.UPLOAD_FOLDER)
 
-import os
 use_https = os.environ.get('USE_HTTPS', 'false').lower() == 'true'
 app.config['SESSION_COOKIE_SECURE'] = use_https
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -123,6 +143,16 @@ try:
     _load_klant_cache()
 except Exception as e:
     logger.warning(f"Could not pre-load klant cache: {e}")
+
+# Rebuild parameter index on startup
+try:
+    from services.category_index_service import build_index as _build_index
+    logger.info("Rebuilding parameter index on startup...")
+    _stats = _build_index()
+    logger.info(f"Index rebuilt: {_stats.get('total_components', 0)} components, "
+                f"{_stats.get('total_parameters', 0)} parameters in {_stats.get('elapsed_seconds', 0):.1f}s")
+except Exception as e:
+    logger.warning(f"Could not rebuild parameter index on startup: {e}")
 
 # Register all blueprints
 register_blueprints(app)
@@ -179,19 +209,110 @@ def rate_limit_error(e):
     return jsonify({'error': 'Too many requests. Please slow down.'}), 429
 
 
+# ---- Windows Service Class ----
+if win32serviceutil is not None:
+    class BOMMatcherService(win32serviceutil.ServiceFramework):
+        """Windows Service wrapper for the BOM Matcher Tool."""
+        _svc_name_ = "BOMMatcherService"
+        _svc_display_name_ = "BOM Matcher Service"
+        _svc_description_ = (
+            "Web application for matching BOM lines to parts "
+            "in Exact Globe ERP system."
+        )
+
+        def __init__(self, args):
+            win32serviceutil.ServiceFramework.__init__(self, args)
+            self.hWaitStop = win32event.CreateEvent(None, 0, 0, None)
+            self.server = None
+
+        def SvcStop(self):
+            """Called when the service is asked to stop."""
+            self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)
+            svc_logger = logging.getLogger(__name__)
+            svc_logger.info("Service stop requested - shutting down...")
+
+            # Stop Cheroot server gracefully
+            if self.server is not None:
+                try:
+                    self.server.stop()
+                    svc_logger.info("Cheroot server stopped")
+                except Exception as e:
+                    svc_logger.error(f"Error stopping server: {e}")
+
+            win32event.SetEvent(self.hWaitStop)
+
+        def SvcDoRun(self):
+            """Called when the service is asked to start."""
+            servicemanager.LogMsg(
+                servicemanager.EVENTLOG_INFORMATION_TYPE,
+                servicemanager.PYS_SERVICE_STARTED,
+                (self._svc_name_, '')
+            )
+
+            # Force working directory to app.py location
+            os.chdir(basedir)
+
+            # Redirect stdout/stderr for headless service operation
+            if sys.stdout is None:
+                sys.stdout = open(os.path.join(basedir, 'service_stdout.log'), 'a', encoding='utf-8')
+            if sys.stderr is None:
+                sys.stderr = open(os.path.join(basedir, 'service_stderr.log'), 'a', encoding='utf-8')
+
+            try:
+                self.main()
+            except Exception as e:
+                logging.getLogger(__name__).error(f"Service crashed: {e}", exc_info=True)
+                servicemanager.LogErrorMsg(f"BOMMatcherService crashed: {str(e)}")
+                raise
+
+        def main(self):
+            """Main service loop using Cheroot for SSL support and graceful shutdown."""
+            svc_logger = logging.getLogger(__name__)
+            svc_logger.info("Service main() started - preparing to launch...")
+
+            if WSGIServer is None:
+                raise ImportError("Cheroot is not installed. Install with: pip install cheroot")
+
+            port = int(os.environ.get('FLASK_PORT', config.FLASK_PORT))
+            svc_logger.info(f"Creating Cheroot WSGI server on 0.0.0.0:{port}...")
+
+            self.server = WSGIServer(('0.0.0.0', port), app)
+
+            # Configure SSL
+            ssl_cert = os.path.join(basedir, 'ssl', 'cert.pem')
+            ssl_key = os.path.join(basedir, 'ssl', 'key.pem')
+            if os.path.exists(ssl_cert) and os.path.exists(ssl_key):
+                self.server.ssl_adapter = BuiltinSSLAdapter(ssl_cert, ssl_key)
+                svc_logger.info("SSL enabled")
+            else:
+                svc_logger.warning("SSL certificates not found - running without HTTPS")
+
+            svc_logger.info("Cheroot server starting...")
+            self.server.start()  # Blocks until server.stop() is called
+            svc_logger.info("Server has stopped")
+
+
 if __name__ == '__main__':
-    ssl_cert = 'ssl2/cert.pem'
-    ssl_key = 'ssl2/key.pem'
-
-    if not (os.path.exists(ssl_cert) and os.path.exists(ssl_key)):
-        ssl_cert = 'ssl/cert.pem'
-        ssl_key = 'ssl/key.pem'
-
-    if os.path.exists(ssl_cert) and os.path.exists(ssl_key):
-        logger.info(f"Starting HTTPS server on {config.FLASK_HOST}:{config.FLASK_PORT}")
-        app.run(debug=config.DEBUG_MODE, host=config.FLASK_HOST, port=config.FLASK_PORT,
-                use_reloader=False, ssl_context=(ssl_cert, ssl_key))
+    # Windows Service mode: when CLI args are passed (install/start/stop/remove)
+    if win32serviceutil and len(sys.argv) > 1:
+        win32serviceutil.HandleCommandLine(BOMMatcherService)
     else:
-        logger.info(f"Starting HTTP server on {config.FLASK_HOST}:{config.FLASK_PORT}")
-        app.run(debug=config.DEBUG_MODE, host=config.FLASK_HOST, port=config.FLASK_PORT,
-                use_reloader=False)
+        # Development / Standalone mode
+        debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('true', '1', 'yes')
+
+        # SSL configuration
+        ssl_cert = os.path.join(basedir, 'ssl', 'cert.pem')
+        ssl_key = os.path.join(basedir, 'ssl', 'key.pem')
+
+        if os.path.exists(ssl_cert) and os.path.exists(ssl_key):
+            ssl_context = (ssl_cert, ssl_key)
+            logger.info("Starting with HTTPS (SSL enabled)")
+        else:
+            ssl_context = None
+            logger.warning(
+                "SSL certificate not found. Starting without HTTPS. "
+                "Run 'python ssl/generate_cert.py' to generate a self-signed certificate."
+            )
+
+        port = int(os.environ.get('FLASK_PORT', config.FLASK_PORT))
+        app.run(debug=debug_mode, host='0.0.0.0', port=port, use_reloader=False, ssl_context=ssl_context)

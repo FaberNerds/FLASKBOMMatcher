@@ -145,12 +145,15 @@ async function uploadFile(file) {
         document.getElementById('mappingSection').style.display = 'block';
         const customerSection = document.getElementById('customerSection');
         if (customerSection) customerSection.style.display = 'block';
-        document.getElementById('processSection').style.display = 'block';
+        document.getElementById('processSection').style.display = 'flex';
 
         // Restore customer selection if previous settings exist
         if (prev && prev.klant_nr) {
             await restoreCustomer(prev.klant_nr);
         }
+
+        // Show clear button if process data exists from a previous session
+        showClearProcessDataBtn(!!data.has_process_data);
 
         if (prev) {
             toast.success(`Restored previous settings for ${data.filename}`);
@@ -688,12 +691,15 @@ async function checkBackNavigation() {
         document.getElementById('mappingSection').style.display = 'block';
         const customerSection = document.getElementById('customerSection');
         if (customerSection) customerSection.style.display = 'block';
-        document.getElementById('processSection').style.display = 'block';
+        document.getElementById('processSection').style.display = 'flex';
 
         // Restore customer selection
         if (data.klant_nr) {
             await restoreCustomer(data.klant_nr);
         }
+
+        // Show clear button if process data exists
+        showClearProcessDataBtn(!!data.has_process_data);
 
         toast.info('Restored previous session');
     } catch (e) {
@@ -707,6 +713,21 @@ async function checkBackNavigation() {
 klantenReady.then(() => checkBackNavigation());
 
 // ========================================================================
+
+function showClearProcessDataBtn(hasData) {
+    const btn = document.getElementById('clearProcessDataBtn');
+    if (btn) btn.style.display = hasData ? '' : 'none';
+}
+
+async function clearProcessData() {
+    try {
+        await apiCall('/api/clear-process-data', { method: 'POST' });
+        showClearProcessDataBtn(false);
+        toast.success('Process data cleared — BOM will be processed fresh');
+    } catch (e) {
+        // toast shown by apiCall
+    }
+}
 
 async function processBom() {
     // Collect mapping (supports multiple columns per standard field)

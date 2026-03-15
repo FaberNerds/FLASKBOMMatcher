@@ -102,10 +102,15 @@
         </div>
 
         <!-- Process Button -->
-        <div id="processSection" style="display: none; margin-top: 24px; text-align: right;">
-            <button class="btn btn-primary btn-lg" id="processBtn" onclick="processBom()">
-                Process BOM &gt;&gt;
+        <div id="processSection" style="display: none; margin-top: 24px; justify-content: space-between; align-items: center;">
+            <button class="btn btn-outline" id="clearProcessDataBtn" onclick="clearProcessData()" style="display: none; color: var(--color-warning); border-color: var(--color-warning);">
+                Clear stored process data
             </button>
+            <div style="margin-left: auto;">
+                <button class="btn btn-primary btn-lg" id="processBtn" onclick="processBom()">
+                    Process BOM &gt;&gt;
+                </button>
+            </div>
         </div>
     </div>
 </div>

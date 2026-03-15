@@ -21,6 +21,11 @@
     <button class="btn btn-outline" id="copyModeBtn" onclick="toggleCopyMode()">Copy: OFF</button>
     <button class="btn btn-outline" id="deleteModeBtn" onclick="toggleDeleteMode()">Delete: OFF</button>
     <button class="btn btn-outline" onclick="exportBom()">Export</button>
+    <div style="display: flex; align-items: center; gap: 4px; margin-left: 8px; border-left: 1px solid var(--border-color); padding-left: 8px;">
+        <button class="btn btn-outline btn-sm" onclick="adjustZoom(-5)" title="Zoom out" style="padding: 2px 6px; min-width: 24px;">-</button>
+        <span id="zoomLevel" style="font-size: 11px; color: var(--text-muted); min-width: 32px; text-align: center; cursor: pointer;" onclick="resetZoom()" title="Click to reset">100%</span>
+        <button class="btn btn-outline btn-sm" onclick="adjustZoom(5)" title="Zoom in" style="padding: 2px 6px; min-width: 24px;">+</button>
+    </div>
 </div>
 
 <!-- Summary Badges -->

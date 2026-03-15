@@ -19,6 +19,45 @@ let modalSuggestions = [];
 let modalRowIndex = null;
 let descColumnWidth = null;
 
+// ========================================================================
+// Zoom Control
+// ========================================================================
+
+const ZOOM_KEY = 'bomMatcherZoom';
+let currentZoom = 100;
+
+function getDefaultZoom() {
+    const w = window.screen.width;
+    if (w <= 1920) return 80;
+    if (w <= 2560) return 90;
+    return 100;
+}
+
+function applyZoom(percent) {
+    currentZoom = Math.max(60, Math.min(120, percent));
+    const panel = document.getElementById('splitPanel');
+    if (panel) panel.style.zoom = (currentZoom / 100).toString();
+    const label = document.getElementById('zoomLevel');
+    if (label) label.textContent = currentZoom + '%';
+    localStorage.setItem(ZOOM_KEY, currentZoom);
+    requestAnimationFrame(() => { if (typeof syncRowHeights === 'function') syncRowHeights(); });
+}
+
+function adjustZoom(delta) {
+    applyZoom(currentZoom + delta);
+}
+
+function resetZoom() {
+    localStorage.removeItem(ZOOM_KEY);
+    applyZoom(getDefaultZoom());
+}
+
+function initZoom() {
+    const saved = localStorage.getItem(ZOOM_KEY);
+    currentZoom = saved ? parseInt(saved, 10) : getDefaultZoom();
+    applyZoom(currentZoom);
+}
+
 /**
  * Get a mapped value from a row, supporting multi-column mappings.
  * When mapping is an array of column names, values are joined with a space.
@@ -64,6 +103,7 @@ function restoreUiState() {
 // ========================================================================
 
 async function loadBomData() {
+    initZoom();
     showLoading();
     try {
         const data = await apiCall('/api/bom-data');
@@ -147,21 +187,21 @@ function renderTables() {
     const leftHead = document.getElementById('leftTableHead');
     let lhHtml = '<tr><th style="width: 36px;">#</th>';
     for (const col of mappedCols) {
+        if (col.std === 'Refdes' && hasMpnfree) {
+            lhHtml += '<th style="width: 80px;">MPNfree</th>';
+        }
         if (col.std === 'Description') {
             lhHtml += `<th class="resizable-th desc-th">${escapeHtml(col.std)}<div class="col-resize-handle" data-col="desc"></div></th>`;
         } else {
             lhHtml += `<th>${escapeHtml(col.std)}</th>`;
         }
     }
-    if (hasMpnfree) {
-        lhHtml += '<th style="width: 80px;">MPNfree</th>';
-    }
     lhHtml += '</tr>';
     leftHead.innerHTML = lhHtml;
 
     // --- Right Table Header ---
     const rightHead = document.getElementById('rightTableHead');
-    rightHead.innerHTML = '<tr><th>FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>KlantNr</th><th>KlantNaam</th><th>Magazijn</th><th>Mounting</th><th>Type</th><th>Status</th><th>Kostprijs</th><th>Voorraad</th><th>Verbruik</th><th>InBestelling</th></tr>';
+    rightHead.innerHTML = '<tr><th>FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>KlantNaam</th><th>Mounting</th><th>Status</th><th>Kostprijs</th><th>Voorraad</th><th>Verbruik</th><th>InBestelling</th><th>KlantNr</th><th>Type</th></tr>';
 
     // --- Build body rows ---
     let leftHtml = '';
@@ -215,6 +255,9 @@ function renderTables() {
         leftHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="selectRow(${i})" ondblclick="showRowDetailModal(${i})">`;
         leftHtml += `<td style="color: var(--text-muted); font-size: 11px;">${i + 1}</td>`;
         for (const col of mappedCols) {
+            if (col.std === 'Refdes' && hasMpnfree) {
+                leftHtml += `<td>${renderMpnfreeDropdown(i)}</td>`;
+            }
             const cellValue = getMappedValue(row, col.actual);
             // Highlight BOM description for MPNfree rows with parameterized match results
             const hlItem = (match && match.auto_selected) || (match && match.display_suggestion);
@@ -225,9 +268,6 @@ function renderTables() {
             } else {
                 leftHtml += `<td${col.std === 'Description' ? ' class="desc-col"' : ''} title="${escapeHtml(cellValue)}">${escapeHtml(cellValue)}</td>`;
             }
-        }
-        if (hasMpnfree) {
-            leftHtml += `<td>${renderMpnfreeDropdown(i)}</td>`;
         }
         leftHtml += '</tr>';
 
@@ -254,18 +294,17 @@ function renderTables() {
             rightHtml += `<td title="${escapeHtml(auto.Omschrijving || '')}">${descHtml}</td>`;
             rightHtml += `<td>${escapeHtml(auto.Manufacturer || '')}</td>`;
             rightHtml += `<td>${renderMpnHighlights(auto, match, row, mapping)}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.KlantNr || '')}</td>`;
             rightHtml += `<td>${escapeHtml(auto.KlantNaam || '')}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.Magazijn || '')}</td>`;
             rightHtml += `<td>${escapeHtml(auto.Mounting || '')}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.Type || '')}</td>`;
             rightHtml += `<td>${escapeHtml(auto.Status || '')}</td>`;
             rightHtml += `<td>${auto.Kostprijs || 0}</td>`;
             rightHtml += `<td>${auto.Voorraad || 0}</td>`;
             rightHtml += `<td>${auto.Verbruik || 0}</td>`;
             rightHtml += `<td>${auto.InBestelling || 0}</td>`;
+            rightHtml += `<td>${escapeHtml(auto.KlantNr || '')}</td>`;
+            rightHtml += `<td>${escapeHtml(auto.Type || '')}</td>`;
         } else {
-            rightHtml += '<td>\u2014</td><td>\u2014</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>';
+            rightHtml += '<td>\u2014</td><td>\u2014</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>';
         }
 
         rightHtml += '</tr>';
@@ -292,6 +331,9 @@ function renderTables() {
     if (descColumnWidth) {
         applyDescColumnWidth(descColumnWidth);
     }
+
+    // Re-apply any active filters
+    filterTable();
 
     // Persist UI state for reload
     saveUiState();
@@ -837,16 +879,15 @@ const modalColumns = [
     { key: 'Omschrijving', label: 'Omschrijving' },
     { key: 'Manufacturer', label: 'Manufacturer' },
     { key: 'MPN', label: 'MPN' },
-    { key: 'KlantNr', label: 'KlantNr' },
     { key: 'KlantNaam', label: 'KlantNaam' },
-    { key: 'Magazijn', label: 'Magazijn' },
     { key: 'Mounting', label: 'Mounting' },
-    { key: 'Type', label: 'Type' },
     { key: 'Status', label: 'Status' },
     { key: 'Kostprijs', label: 'Kostprijs', numeric: true },
     { key: 'Voorraad', label: 'Voorraad', numeric: true },
     { key: 'Verbruik', label: 'Verbruik', numeric: true },
     { key: 'InBestelling', label: 'InBestelling', numeric: true },
+    { key: 'KlantNr', label: 'KlantNr' },
+    { key: 'Type', label: 'Type' },
 ];
 
 function sortModalTable(columnKey) {
@@ -910,16 +951,15 @@ function buildAlternativesTable(suggestions, rowIndex) {
             <td title="${escapeHtml(s.Omschrijving || '')}">${descHtml}</td>
             <td>${escapeHtml(s.Manufacturer || '')}</td>
             <td><span class="mpn-clickable" title="Click: Copy | Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(s.MPN || '')}</span></td>
-            <td>${escapeHtml(s.KlantNr || '')}</td>
             <td>${escapeHtml(s.KlantNaam || '')}</td>
-            <td>${escapeHtml(s.Magazijn || '')}</td>
             <td>${escapeHtml(s.Mounting || '')}</td>
-            <td>${escapeHtml(s.Type || '')}</td>
             <td>${escapeHtml(s.Status || '')}</td>
             <td>${s.Kostprijs || 0}</td>
             <td>${s.Voorraad || 0}</td>
             <td>${s.Verbruik || 0}</td>
             <td>${s.InBestelling || 0}</td>
+            <td>${escapeHtml(s.KlantNr || '')}</td>
+            <td>${escapeHtml(s.Type || '')}</td>
             <td><button class="btn btn-primary btn-sm" onclick="selectFromModal(${rowIndex}, '${fabernr}')">Select</button></td>
         </tr>`;
     }

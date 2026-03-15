@@ -117,7 +117,7 @@ def _rank_suggestions(
     def sort_key(s):
         is_vervallen = 1 if s.get('Status', '') == 'Vervallen' else 0
         score = s.get('_similarity_score', 0) or 0
-        score_tier = 0 if score >= 95 else (1 if score >= 70 else 2)
+        score_tier = 0 if score >= 99.5 else (1 if score >= 95 else (2 if score >= 70 else 3))
         has_stock = 1 if (s.get('Voorraad', 0) or 0) > 0 else 0
         kostprijs = s.get('Kostprijs', 0) or 0
         in_budget_and_stocked = 1 if (within_budget(kostprijs) and has_stock and not is_vervallen) else 0
@@ -190,7 +190,7 @@ def _search_row_by_description(row_index: int, search_terms: List[str], selected
     }
 
 
-def _search_row_by_parameters(row_index: int, description: str, category: str, selected_klant_nr: str = "") -> Dict[str, Any]:
+def _search_row_by_parameters(row_index: int, description: str, category: str, selected_klant_nr: str = "", bom_mpn: str = "") -> Dict[str, Any]:
     """Search a single row using parameterized matching against the SQLite index.
 
     1. Extract parameters from customer description
@@ -233,6 +233,8 @@ def _search_row_by_parameters(row_index: int, description: str, category: str, s
         erp_data['_bom_highlights'] = get_match_highlights(
             params, description, category
         )
+        if bom_mpn:
+            erp_data['_mpn_highlights'] = get_mpn_highlights(bom_mpn, erp_data.get('Omschrijving', ''))
         suggestions.append(erp_data)
 
     if not suggestions:
@@ -315,7 +317,7 @@ def find_ipn_batch(
         if is_mpnfree and desc:
             category = detect_category(desc)
             if category and is_generic_rc(category):
-                param_rows.append((i, desc, category))
+                param_rows.append((i, desc, category, mpn or ''))
                 logger.debug(f"Row {i}: path=PARAM (MPNfree), category='{category}', desc='{desc[:60]}'")
                 continue
             # MPNfree but not a recognized R/C category — fall through to description search
@@ -359,8 +361,8 @@ def find_ipn_batch(
             futures[f] = ('ipn', row_idx)
 
         # Submit parameterized searches
-        for row_idx, desc, category in param_rows:
-            f = executor.submit(_search_row_by_parameters, row_idx, desc, category, selected_klant_nr)
+        for row_idx, desc, category, row_mpn in param_rows:
+            f = executor.submit(_search_row_by_parameters, row_idx, desc, category, selected_klant_nr, row_mpn)
             futures[f] = ('param', row_idx)
 
         # Submit description searches (word-split)
@@ -452,7 +454,7 @@ def find_ipn_single(
     if is_mpnfree and desc:
         category = detect_category(desc)
         if category and is_generic_rc(category):
-            result = _search_row_by_parameters(row_index, desc, category, selected_klant_nr)
+            result = _search_row_by_parameters(row_index, desc, category, selected_klant_nr, mpn or '')
             if result is not None:
                 return result
 

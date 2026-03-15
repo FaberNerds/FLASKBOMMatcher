@@ -277,15 +277,16 @@ def parse_weerstanden(desc: str) -> Dict[str, str]:
     d = re.sub(r'^(RES|WEERSTAND)\s+', '', desc.strip(), flags=re.IGNORECASE)
 
     # Value: look for resistance notation
-    # Patterns: 8E2, 4R7, 0R47, 100R, 10k, 1k54, 1M, 2,2k, 820R, 1.5k, 191E, 47E
-    m = re.search(r'\b(\d+E\d+|\d+[Rr]\d*|\d+(?:[.,]\d+)?[kKmM](?:\d+)?|\d+(?:[.,]\d+)?(?=[Ωo\s]))', d)
-    if m:
-        params["value"] = m.group(1)
+    # First try: standalone E-notation without trailing digits (ERP format: 267E, 470E, 150E)
+    # Must check before the catch-all pattern, which would grab the package code instead
+    m_e = re.search(r'\b(\d+)E(?!\d)', d, re.IGNORECASE)
+    if m_e:
+        params["value"] = m_e.group(1) + "R"
     else:
-        # ERP format: 191E, 47E, 825E (value in ohms with trailing E, no decimal digits)
-        m = re.search(r'\b(\d+)E\b', d)
+        # Standard patterns: 8E2, 4R7, 0R47, 100R, 10k, 1k54, 1M, 2,2k, 820R, 1.5k
+        m = re.search(r'\b(\d+E\d+|\d+[Rr]\d*|\d+(?:[.,]\d+)?[kKmM](?:\d+)?|\d+(?:[.,]\d+)?(?=[Ωo\s]))', d)
         if m:
-            params["value"] = m.group(1) + "R"  # Convert to standard R-notation (191R = 191Ω)
+            params["value"] = m.group(1)
 
     # Tolerance
     tol = _parse_tolerance(d)
@@ -1011,7 +1012,12 @@ class CategoryIndex:
                     qnum = _to_numeric(pname, qval)
                     cnum = _to_numeric(pname, cval)
                     if qnum is not None and cnum is not None and max(qnum, cnum) > 0:
-                        param_score = 100.0 if abs(qnum - cnum) / max(qnum, cnum) < 0.01 else 0.0
+                        ratio = abs(qnum - cnum) / max(qnum, cnum)
+                        if ratio < 0.01:
+                            # Graduated: exact match = 100, edge of 1% = 90
+                            param_score = 100.0 - (ratio / 0.01) * 10.0
+                        else:
+                            param_score = 0.0
                     else:
                         param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
                 else:

@@ -96,15 +96,28 @@ def _extract_weerstanden(desc: str) -> Dict[str, str]:
         raw = ohm_pat.group(0).strip()
         params['value'] = raw
 
+    # Fallback: plain number as ohms (e.g. "150" in "Resistor 150 1% 50mW")
+    _SMD_CODES = {'0201', '0402', '0603', '0805', '1206', '1210', '1812', '2010', '2512'}
+    if not params.get('value'):
+        plain = re.search(
+            r'\b(\d+(?:[.,]\d+)?)\b(?=\s+(?:\d|±|%|mW|W\b|V\b))',
+            desc, re.IGNORECASE)
+        if plain and plain.group(1) not in _SMD_CODES:
+            params['value'] = plain.group(1) + 'R'
+
     # --- Tolerance ---
     tol = _find_tolerance(desc)
     if tol:
         params['tolerance'] = tol
 
     # --- Power rating ---
+    # Milliwatt form: 50mW, 100mW
+    mw = re.search(r'\b(\d+(?:[.,]\d+)?)\s*mW\b', desc, re.IGNORECASE)
+    if mw:
+        mw_val = float(mw.group(1).replace(',', '.'))
+        params['power'] = f"{mw_val / 1000.0}W"
     # Fraction form: 1/4W, 1/8W
-    frac = re.search(r'\b(\d+)/(\d+)\s*W\b', desc, re.IGNORECASE)
-    if frac:
+    elif (frac := re.search(r'\b(\d+)/(\d+)\s*W\b', desc, re.IGNORECASE)):
         val = round(int(frac.group(1)) / int(frac.group(2)), 4)
         params['power'] = f"{val}W"
     else:

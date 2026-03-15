@@ -168,6 +168,34 @@ def load_mapping_history(filename: str) -> dict | None:
         return None
 
 
+def clear_process_data() -> bool:
+    """Clear process-page data (matches, mpnfree, selections) for the current session.
+
+    Returns True if any files were deleted.
+    """
+    session_id = session.get('session_id')
+    if not session_id:
+        return False
+    deleted = False
+    for suffix in ['matches', 'mpnfree', 'selections']:
+        path = _get_path(session_id, suffix)
+        if path.exists():
+            path.unlink()
+            deleted = True
+    return deleted
+
+
+def has_process_data() -> bool:
+    """Check if the current session has any process-page data."""
+    session_id = session.get('session_id')
+    if not session_id:
+        return False
+    return any(
+        _get_path(session_id, suffix).exists()
+        for suffix in ['matches', 'mpnfree', 'selections']
+    )
+
+
 def clear_session_data() -> None:
     """Clear all session data and associated temporary files."""
     session_id = session.get('session_id')

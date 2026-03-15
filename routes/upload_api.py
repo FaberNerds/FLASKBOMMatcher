@@ -13,7 +13,7 @@ from services.session_service import (
     get_session_id, save_bom_data, load_bom_data,
     save_mapping_history, load_mapping_history,
     load_matches, load_mpnfree, load_selections,
-    save_to_history
+    save_to_history, has_process_data, clear_process_data
 )
 from services.klant_cache_service import get_all_klanten
 
@@ -69,7 +69,8 @@ def upload_file():
             'headers': headers,
             'preview_rows': rows[:50],
             'total_rows': len(rows),
-            'sheets': sheets
+            'sheets': sheets,
+            'has_process_data': has_process_data(),
         }
         if previous_settings:
             result['previous_settings'] = previous_settings
@@ -220,4 +221,12 @@ def get_upload_state():
         'end_row': bom_data.get('end_row'),
         'column_mapping': bom_data.get('column_mapping', {}),
         'klant_nr': bom_data.get('klant_nr', ''),
+        'has_process_data': has_process_data(),
     })
+
+
+@upload_bp.route('/clear-process-data', methods=['POST'])
+def clear_process_data_endpoint():
+    """Clear stored process-page data (matches, mpnfree, selections) for the current BOM."""
+    deleted = clear_process_data()
+    return jsonify({'success': True, 'cleared': deleted})
