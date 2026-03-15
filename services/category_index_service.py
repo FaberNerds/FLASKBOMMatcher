@@ -87,6 +87,11 @@ def normalize_resistance(value_str: str) -> Optional[float]:
         return None
     s = _european_decimal(value_str.strip())
 
+    # Normalize spelled-out units: KOHM→k, MOHM→M, OHM→R
+    s = re.sub(r'\s*KOHM$', 'k', s, flags=re.IGNORECASE)
+    s = re.sub(r'\s*MOHM$', 'M', s, flags=re.IGNORECASE)
+    s = re.sub(r'\s*OHM$', 'R', s, flags=re.IGNORECASE)
+
     # E-notation: 8E2 = 8 * 10^2 = 800, but in resistor context 8E2 = 820
     # Actually in E-series notation: 8E2 means 8.2 * 100 = 820? No.
     # Standard ERP: 8E2 means the digit after E replaces decimal → 8.2
