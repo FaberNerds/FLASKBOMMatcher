@@ -10,7 +10,7 @@ let mpnfreeResults = {};
 let selections = {};
 let selectedRow = null;
 let activeModal = null;
-let manualSearchMode = true;
+let copyMode = false;
 let deleteMode = false;
 let deletedRows = new Set();
 let modalSortColumn = null;
@@ -146,6 +146,10 @@ function renderTables() {
             fabernr = match.auto_selected.FaberNr || '';
             confidence = match.confidence || 'none';
             searchMethod = match.search_method || '';
+        } else if (match && match.display_suggestion) {
+            // Partial match: show suggestion but don't assign fabernr
+            confidence = match.confidence || 'none';
+            searchMethod = match.search_method || '';
         }
 
         // Row class for color coding
@@ -168,13 +172,16 @@ function renderTables() {
         const selClass = selectedRow === i ? ' row-selected' : '';
 
         // --- Left row ---
-        leftHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="selectRow(${i})">`;
+        leftHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="selectRow(${i})" ondblclick="showRowDetailModal(${i})">`;
         leftHtml += `<td style="color: var(--text-muted); font-size: 11px;">${i + 1}</td>`;
         for (const col of mappedCols) {
             const cellValue = getMappedValue(row, col.actual);
             // Highlight BOM description for MPNfree rows with parameterized match results
-            if (col.std === 'Description' && hasMpnfree && getMpnfreeValue(i) && match && match.auto_selected && match.auto_selected._bom_highlights && match.auto_selected._bom_highlights.length > 0) {
-                leftHtml += `<td class="desc-col" title="${escapeHtml(cellValue)}">${applyHighlights(cellValue, match.auto_selected._bom_highlights)}</td>`;
+            const hlItem = (match && match.auto_selected) || (match && match.display_suggestion);
+            if (col.std === 'Description' && hasMpnfree && getMpnfreeValue(i) && hlItem && hlItem._bom_highlights && hlItem._bom_highlights.length > 0) {
+                leftHtml += `<td class="desc-col" title="${escapeHtml(cellValue)}">${applyHighlights(cellValue, hlItem._bom_highlights)}</td>`;
+            } else if (col.std === 'MPN' && cellValue) {
+                leftHtml += `<td title="${escapeHtml(cellValue)}"><span class="mpn-clickable" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(cellValue)}</span></td>`;
             } else {
                 leftHtml += `<td${col.std === 'Description' ? ' class="desc-col"' : ''} title="${escapeHtml(cellValue)}">${escapeHtml(cellValue)}</td>`;
             }
@@ -185,15 +192,18 @@ function renderTables() {
         leftHtml += '</tr>';
 
         // --- Right row ---
-        rightHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="onRightRowClick(${i})">`;
+        rightHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="onRightRowClick(${i})" ondblclick="showRowDetailModal(${i})">`;
 
-        // Determine which item to display: manually selected suggestion or auto_selected
+        // Determine which item to display: manually selected suggestion, auto_selected, or display_suggestion
         let displayItem = null;
         if (sel.fabernr && match && match.suggestions) {
             displayItem = match.suggestions.find(s => s.FaberNr === sel.fabernr);
         }
         if (!displayItem && match && match.auto_selected) {
             displayItem = match.auto_selected;
+        }
+        if (!displayItem && match && match.display_suggestion) {
+            displayItem = match.display_suggestion;
         }
 
         if (displayItem) {
@@ -467,10 +477,10 @@ function renderMpnHighlights(suggestion, match, customerRow, mapping) {
     if (highlights && highlights.length > 0) {
         const hl = highlights[0];
         const hlClass = hl.match_type === 'exact' ? 'hl-mpn-exact' : 'hl-mpn-partial';
-        return `<span class="${hlClass}">${escapeHtml(erpMpn)}</span>`;
+        return `<span class="mpn-clickable ${hlClass}" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(erpMpn)}</span>`;
     }
 
-    return escapeHtml(erpMpn);
+    return `<span class="mpn-clickable" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(erpMpn)}</span>`;
 }
 
 function renderScore(suggestion, match) {
@@ -539,13 +549,14 @@ function updateSummaryBadges(matched, partial, noMatch, param) {
 // Row Selection — Full-Screen Modal
 // ========================================================================
 
-function toggleManualSearch() {
-    manualSearchMode = !manualSearchMode;
-    const btn = document.getElementById('manualSearchBtn');
+function toggleCopyMode() {
+    copyMode = !copyMode;
+    const btn = document.getElementById('copyModeBtn');
     if (btn) {
-        btn.textContent = manualSearchMode ? 'Manual search: ON' : 'Manual search: OFF';
-        btn.className = manualSearchMode ? 'btn btn-primary' : 'btn btn-outline';
+        btn.textContent = copyMode ? 'Copy: ON' : 'Copy: OFF';
+        btn.className = copyMode ? 'btn btn-primary' : 'btn btn-outline';
     }
+    document.getElementById('splitPanel').style.cursor = copyMode ? 'copy' : '';
 }
 
 function toggleDeleteMode() {
@@ -587,9 +598,6 @@ function selectRow(rowIndex) {
     selectedRow = rowIndex;
     renderTables();
     scrollSelectedRowIntoView();
-    if (!manualSearchMode) {
-        showRowDetailModal(rowIndex);
-    }
 }
 
 function openSelectedRowModal() {
@@ -1074,9 +1082,8 @@ async function exportBom() {
 // ========================================================================
 
 document.addEventListener('keydown', (e) => {
-    // Only handle arrow keys when no modal is open and manual search is on
+    // Only handle arrow keys when no modal is open
     if (activeModal) return;
-    if (!manualSearchMode) return;
     if (!bomData || !bomData.rows) return;
 
     const totalRows = bomData.rows.length;
@@ -1118,6 +1125,44 @@ document.addEventListener('keydown', (e) => {
     } else if (e.key === 'Enter') {
         e.preventDefault();
         openSelectedRowModal();
+    }
+});
+
+// ========================================================================
+// Delegated Click Handler for MPN shortcuts and Copy Mode
+// ========================================================================
+
+document.getElementById('splitPanel').addEventListener('click', function(e) {
+    // Copy mode: copy any cell's text to clipboard
+    if (copyMode) {
+        const td = e.target.closest('td');
+        if (td) {
+            e.stopPropagation();
+            e.preventDefault();
+            const text = td.textContent.trim();
+            if (text && text !== '\u2014') {
+                navigator.clipboard.writeText(text).then(() => {
+                    td.style.outline = '2px solid var(--color-primary)';
+                    setTimeout(() => { td.style.outline = ''; }, 300);
+                    toast.success(`Copied: ${text.substring(0, 50)}`);
+                }).catch(() => {});
+            }
+            return;
+        }
+    }
+
+    // MPN click shortcuts: Ctrl+Click=Google, Alt+Click=DigiKey
+    const mpnEl = e.target.closest('.mpn-clickable');
+    if (mpnEl && (e.ctrlKey || e.metaKey || e.altKey)) {
+        const mpn = mpnEl.innerText.trim();
+        if (!mpn) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.ctrlKey || e.metaKey) {
+            window.open(`https://www.google.com/search?q=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
+        } else if (e.altKey) {
+            window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
+        }
     }
 });
 

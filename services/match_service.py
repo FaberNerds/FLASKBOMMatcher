@@ -139,7 +139,9 @@ def _search_row_by_mpn(row_index: int, mpn: str, manufacturer: str = "", selecte
 
     ranked = _rank_suggestions(results[:20], selected_klant_nr)
     confidence = 'high' if ranked and ranked[0].get('_exact_match') else ('medium' if ranked else 'none')
-    auto = ranked[0] if ranked else None
+    # Only auto-select for exact matches; partial matches show as suggestion only
+    auto = ranked[0] if confidence == 'high' and ranked else None
+    display_suggestion = ranked[0] if ranked else None
     auto_str = f" → {auto['FaberNr']}" if auto else ""
     logger.info(f"Row {row_index}: MPN '{mpn}' — {len(results)} hits, {confidence}{auto_str}")
 
@@ -148,6 +150,7 @@ def _search_row_by_mpn(row_index: int, mpn: str, manufacturer: str = "", selecte
         'search_method': 'mpn',
         'suggestions': ranked,
         'auto_selected': auto,
+        'display_suggestion': display_suggestion,
         'confidence': confidence
     }
 
@@ -248,8 +251,8 @@ def _search_row_by_parameters(row_index: int, description: str, category: str, s
     else:
         confidence = 'low'
 
-    # Only auto-select if score is good enough
-    auto = ranked[0] if top_score >= 60 else None
+    # Only auto-select for high confidence (green lines); yellow lines require manual pick
+    auto = ranked[0] if confidence == 'high' else None
     logger.info(
         f"Row {row_index}: PARAM '{description[:40]}' [{category}] "
         f"— {len(ranked)} hits, top score={top_score:.0f}%, {confidence}"

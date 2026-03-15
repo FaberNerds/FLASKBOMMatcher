@@ -45,14 +45,27 @@ VOLTAGE_UP_OK = {"CONDENSATOREN", "ELCO'S EN TANTALEN"}
 TOLERANCE_DOWN_OK = {"CONDENSATOREN", "ELCO'S EN TANTALEN", "WEERSTANDEN"}
 # Categories where higher power is acceptable (candidate_power >= query_power → 100%)
 POWER_UP_OK = {"WEERSTANDEN"}
+# Categories where a higher-ranked dielectric is acceptable (e.g. X7R for X5R)
+DIELECTRIC_UP_OK = {"CONDENSATOREN"}
+# Dielectric hierarchy: higher rank = more stable, acceptable as substitute for lower rank
+DIELECTRIC_HIERARCHY = {
+    "C0G": 6, "NP0": 6, "U2J": 5,
+    "X8R": 4, "X8L": 4, "X7R": 3, "X7S": 3, "X6S": 2, "X5R": 1,
+    "Y5V": 0, "Z5U": 0,
+}
 
 # Params that allow directional substitution per category.
 # All other params → exact match only (100% or 0%, no partial credit).
 SUBSTITUTABLE_PARAMS = {
-    "CONDENSATOREN":       {"voltage", "tolerance"},
+    "CONDENSATOREN":       {"voltage", "tolerance", "dielectric"},
     "ELCO'S EN TANTALEN":  {"voltage", "tolerance"},
     "WEERSTANDEN":         {"tolerance", "power"},
 }
+
+# Parameters where a mismatch disqualifies the entire match (score → 0).
+# Package: wrong footprint means the component physically won't fit.
+# Core value (capacitance/value/inductance): wrong value is never acceptable.
+DISQUALIFYING_PARAMS = {"package", "capacitance", "value", "inductance", "case_size"}
 
 
 # ===========================================================================
@@ -151,14 +164,14 @@ def normalize_capacitance(value_str: str) -> Optional[float]:
         return None
     s = _european_decimal(value_str.strip())
 
-    m = re.match(r'^(\d+(?:\.\d+)?)\s*([pnuµmPNUM]?)[Ff]?$', s)
+    m = re.match(r'^(\d+(?:\.\d+)?)\s*([fpnuµmPNUM]?)[Ff]?$', s)
     if not m:
         return None
 
     val = float(m.group(1))
     prefix = m.group(2)
 
-    multipliers = {'p': 1e-12, 'P': 1e-12, 'n': 1e-9, 'N': 1e-9,
+    multipliers = {'f': 1e-15, 'p': 1e-12, 'P': 1e-12, 'n': 1e-9, 'N': 1e-9,
                    'u': 1e-6, 'U': 1e-6, 'µ': 1e-6,
                    'm': 1e-3, 'M': 1e-3, '': 1.0}
     return val * multipliers.get(prefix, 1.0)
@@ -213,8 +226,13 @@ def normalize_package(pkg_str: str) -> str:
 # ===========================================================================
 
 def _parse_tolerance(desc: str) -> Optional[str]:
-    """Extract tolerance value like 1%, 5%, 0.1%, ±10%."""
+    """Extract tolerance value like 1%, 5%, 0.1%, ±10%, %10."""
+    # Standard format: 10%, ±5%, 0.1%
     m = re.search(r'[±]?\s*(\d+(?:[.,]\d+)?)\s*%', desc)
+    if m:
+        return _european_decimal(m.group(1)) + "%"
+    # Reversed format: %10, %5 (percent sign before number)
+    m = re.search(r'%\s*(\d+(?:[.,]\d+)?)\b', desc)
     if m:
         return _european_decimal(m.group(1)) + "%"
     return None
@@ -312,7 +330,7 @@ def parse_condensatoren(desc: str) -> Dict[str, str]:
         params["dielectric"] = val
 
     # Capacitance: 100nF, 10uF, 4,7pF, 1µF (with F suffix)
-    m = re.search(r'(\d+(?:[.,]\d+)?)\s*([pnuµPNUµ])[Ff]', d)
+    m = re.search(r'(\d+(?:[.,]\d+)?)\s*([fpnuµFPNUµ])[Ff]', d)
     if m:
         params["capacitance"] = _european_decimal(m.group(1)) + m.group(2).lower() + "F"
     else:
@@ -946,6 +964,9 @@ class CategoryIndex:
 
             cval = candidate_params.get(pname)
             if cval is None:
+                # Missing disqualifying param → candidate is invalid
+                if pname in DISQUALIFYING_PARAMS:
+                    return 0.0, matched
                 continue
 
             matched[pname] = (qval, cval)
@@ -964,6 +985,13 @@ class CategoryIndex:
                     ctol = _parse_tolerance_pct(cval)
                     if qtol is not None and ctol is not None and ctol <= qtol:
                         param_score = 100.0
+                    else:
+                        param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
+                elif pname == "dielectric" and category in DIELECTRIC_UP_OK:
+                    q_rank = DIELECTRIC_HIERARCHY.get(_norm_str(qval))
+                    c_rank = DIELECTRIC_HIERARCHY.get(_norm_str(cval))
+                    if q_rank is not None and c_rank is not None:
+                        param_score = 100.0 if c_rank >= q_rank else 0.0
                     else:
                         param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
                 elif pname == "power" and category in POWER_UP_OK:
@@ -1006,6 +1034,10 @@ class CategoryIndex:
                     param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
 
             weighted_sum += param_score * w
+
+            # If a disqualifying param mismatches, the entire candidate is invalid
+            if param_score == 0.0 and pname in DISQUALIFYING_PARAMS:
+                return 0.0, matched
 
         score = weighted_sum / total_weight if total_weight > 0 else 0.0
         return score, matched

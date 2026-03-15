@@ -473,6 +473,9 @@ async function populateMatcherParamsTable() {
         if (!displayItem && match && match.auto_selected) {
             displayItem = match.auto_selected;
         }
+        if (!displayItem && match && match.display_suggestion) {
+            displayItem = match.display_suggestion;
+        }
         if (displayItem) {
             erpDesc = String(displayItem.Omschrijving || '');
         }

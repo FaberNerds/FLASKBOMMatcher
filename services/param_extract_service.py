@@ -124,12 +124,15 @@ def _extract_condensatoren(desc: str) -> Dict[str, str]:
     """Extract capacitor parameters."""
     params: Dict[str, str] = {}
 
-    # Capacitance: 100nF, 10uF, 4.7pF, 1µF, 4,7nF
+    # Capacitance: 100nF, 10uF, 4.7pF, 1µF, 4,7nF, 500fF
     cap = re.search(
-        r'\b(\d+(?:[.,]\d+)?)\s*([pnuµm]?F)\b', desc, re.IGNORECASE)
+        r'\b(\d+(?:[.,]\d+)?)\s*([fpnuµm]?F)\b', desc, re.IGNORECASE)
     if cap:
         val = cap.group(1).replace(',', '.')
         unit = cap.group(2).replace('µ', 'u')
+        # Restore canonical casing: FF→fF, NF→nF, PF→pF, UF→uF, MF→mF
+        if len(unit) == 2 and unit[1] == 'F':
+            unit = unit[0].lower() + 'F'
         params['capacitance'] = f"{val}{unit}"
 
     # Voltage
@@ -317,6 +320,8 @@ def _extract_elcos(desc: str) -> Dict[str, str]:
     if cap:
         val = cap.group(1).replace(',', '.')
         unit = cap.group(2).replace('µ', 'u')
+        if len(unit) == 2 and unit[1] == 'F':
+            unit = unit[0].lower() + 'F'
         params['capacitance'] = f"{val}{unit}"
 
     # Voltage

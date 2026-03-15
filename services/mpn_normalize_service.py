@@ -62,6 +62,39 @@ def generate_mpn_variants(mpn: str) -> List[str]:
         if no_space not in variants:
             variants.append(no_space)
 
+    # Remove ALL whitespace (handles tabs, spaces around parentheses, etc.)
+    no_ws = re.sub(r'\s+', '', mpn)
+    if no_ws not in variants:
+        variants.append(no_ws)
+
+    # Normalize whitespace around parentheses/brackets
+    normalized_parens = re.sub(r'\s*([()])\s*', r'\1', mpn)
+    if normalized_parens not in variants:
+        variants.append(normalized_parens)
+
+    # Add space before opening parentheses (catches ERP entries with spaces before parens)
+    with_paren_space = re.sub(r'([^\s])\(', r'\1 (', mpn)
+    if with_paren_space not in variants:
+        variants.append(with_paren_space)
+
+    # Strip parenthesized content for broader matching (e.g., "SM02B-SRSS-TB(LF)(SN)" → "SM02B-SRSS-TB")
+    paren_idx = mpn.find('(')
+    if paren_idx > 0:
+        base_before_parens = mpn[:paren_idx].rstrip()
+        if base_before_parens and len(base_before_parens) >= 5 and base_before_parens not in variants:
+            variants.append(base_before_parens)
+
+    # Strip trailing dash + short suffix (package/version codes like -7, -13, -4, -7B)
+    # Known suffixes (TR, ND, CT, etc.) are already handled above
+    _known_suffixes = {'TR', 'ND', 'CT', 'DKR'}
+    trailing_match = re.match(r'^(.+?)-([A-Za-z0-9]{1,4})$', mpn)
+    if trailing_match:
+        base = trailing_match.group(1)
+        suffix = trailing_match.group(2).upper()
+        if base and len(base) >= 5 and suffix not in _known_suffixes:
+            if base not in variants:
+                variants.append(base)
+
     return variants
 
 
@@ -97,6 +130,11 @@ def search_with_variants(
     return results
 
 
+def _normalize_for_comparison(s: str) -> str:
+    """Strip all whitespace and normalize to uppercase for comparison."""
+    return re.sub(r'\s+', '', s).upper()
+
+
 def search_with_variants_batched(
     mpn: str,
     batch_search_fn: Callable[[List[str]], List[Dict[str, Any]]]
@@ -122,6 +160,7 @@ def search_with_variants_batched(
 
     # Deduplicate by FaberNr and tag with variant/exact_match info
     mpn_upper = mpn.upper()
+    mpn_normalized = _normalize_for_comparison(mpn)
     seen_fabernr = set()
     results = []
 
@@ -133,6 +172,7 @@ def search_with_variants_batched(
 
         # Determine which variant matched this hit
         hit_mpn = (hit.get('MPN', '') or '').upper()
+        hit_mpn_normalized = _normalize_for_comparison(hit.get('MPN', '') or '')
         matched_variant = mpn  # default
         is_exact = False
         for variant in variants:
@@ -141,6 +181,11 @@ def search_with_variants_batched(
                 if variant.upper() == mpn_upper:
                     is_exact = True
                 break
+
+        # Also treat as exact if the normalized MPNs match
+        # (handles whitespace-only differences like "TB(LF)" vs "TB (LF)")
+        if not is_exact and hit_mpn_normalized == mpn_normalized:
+            is_exact = True
 
         hit['_search_variant'] = matched_variant
         hit['_exact_match'] = is_exact

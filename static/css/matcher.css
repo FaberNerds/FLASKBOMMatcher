@@ -521,6 +521,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 180px;
+    border-right: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.split-panel .data-table th:last-child,
+.split-panel .data-table td:last-child {
+    border-right: none;
 }
 
 /* Description columns: double default width */
