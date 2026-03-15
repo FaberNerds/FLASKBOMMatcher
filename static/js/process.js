@@ -28,8 +28,8 @@ let currentZoom = 100;
 
 function getDefaultZoom() {
     const w = window.screen.width;
-    if (w <= 1920) return 80;
-    if (w <= 2560) return 90;
+    if (w <= 1920) return 70;
+    if (w <= 2560) return 85;
     return 100;
 }
 
@@ -119,6 +119,14 @@ async function loadBomData() {
         if (data.selections && Object.keys(data.selections).length > 0) {
             selections = data.selections;
         }
+
+        // Clear stale client-side state if the BOM has changed
+        const prevBomName = sessionStorage.getItem('processBomName');
+        const currentBomName = data.name || '';
+        if (prevBomName !== currentBomName) {
+            sessionStorage.removeItem('processUiState');
+        }
+        sessionStorage.setItem('processBomName', currentBomName);
 
         // Restore client-only UI state from sessionStorage
         restoreUiState();

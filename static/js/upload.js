@@ -722,6 +722,8 @@ function showClearProcessDataBtn(hasData) {
 async function clearProcessData() {
     try {
         await apiCall('/api/clear-process-data', { method: 'POST' });
+        sessionStorage.removeItem('processUiState');
+        sessionStorage.removeItem('processBomName');
         showClearProcessDataBtn(false);
         toast.success('Process data cleared — BOM will be processed fresh');
     } catch (e) {

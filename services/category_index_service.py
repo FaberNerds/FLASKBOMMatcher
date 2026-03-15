@@ -1018,9 +1018,10 @@ class CategoryIndex:
                     cnum = _to_numeric(pname, cval)
                     if qnum is not None and cnum is not None and max(qnum, cnum) > 0:
                         ratio = abs(qnum - cnum) / max(qnum, cnum)
-                        if ratio < 0.01:
-                            # Graduated: exact match = 100, edge of 1% = 90
-                            param_score = 100.0 - (ratio / 0.01) * 10.0
+                        # Disqualifying params require exact numeric match
+                        threshold = 0.001 if pname in DISQUALIFYING_PARAMS else 0.01
+                        if ratio < threshold:
+                            param_score = 100.0 - (ratio / max(threshold, 0.001)) * 10.0
                         else:
                             param_score = 0.0
                     else:
