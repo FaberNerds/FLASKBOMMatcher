@@ -35,6 +35,31 @@ function getMappedValue(row, mappingValue) {
 const leftColumns = ['Description', 'MPN', 'Manufacturer', 'Quantity', 'Refdes'];
 
 // ========================================================================
+// UI State Persistence (sessionStorage for client-only state)
+// ========================================================================
+
+function saveUiState() {
+    try {
+        sessionStorage.setItem('processUiState', JSON.stringify({
+            deletedRows: Array.from(deletedRows),
+            descColumnWidth: descColumnWidth,
+            selectedRow: selectedRow,
+        }));
+    } catch (e) { /* ignore */ }
+}
+
+function restoreUiState() {
+    try {
+        const raw = sessionStorage.getItem('processUiState');
+        if (!raw) return;
+        const state = JSON.parse(raw);
+        if (state.deletedRows) deletedRows = new Set(state.deletedRows);
+        if (state.descColumnWidth) descColumnWidth = state.descColumnWidth;
+        if (state.selectedRow !== null && state.selectedRow !== undefined) selectedRow = state.selectedRow;
+    } catch (e) { /* ignore */ }
+}
+
+// ========================================================================
 // Page Init
 // ========================================================================
 
@@ -43,6 +68,21 @@ async function loadBomData() {
     try {
         const data = await apiCall('/api/bom-data');
         bomData = data;
+
+        // Restore server-side state (matches, mpnfree, selections)
+        if (data.matches && Object.keys(data.matches).length > 0) {
+            matchResults = data.matches;
+        }
+        if (data.mpnfree && Object.keys(data.mpnfree).length > 0) {
+            mpnfreeResults = data.mpnfree;
+        }
+        if (data.selections && Object.keys(data.selections).length > 0) {
+            selections = data.selections;
+        }
+
+        // Restore client-only UI state from sessionStorage
+        restoreUiState();
+
         document.getElementById('bomName').textContent = data.name || 'Untitled';
         document.getElementById('bomStats').textContent = `${data.total_rows} rows`;
         renderTables();
@@ -252,6 +292,9 @@ function renderTables() {
     if (descColumnWidth) {
         applyDescColumnWidth(descColumnWidth);
     }
+
+    // Persist UI state for reload
+    saveUiState();
 }
 
 function applyDescColumnWidth(w) {
@@ -370,6 +413,7 @@ function setupColumnResize() {
                 handle.classList.remove('active');
                 document.removeEventListener('mousemove', onMouseMove);
                 document.removeEventListener('mouseup', onMouseUp);
+                saveUiState();
             }
 
             document.addEventListener('mousemove', onMouseMove);

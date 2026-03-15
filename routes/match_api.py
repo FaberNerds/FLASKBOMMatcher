@@ -6,11 +6,12 @@ import logging
 from flask import Blueprint, request, jsonify
 
 from services.session_service import (
-    load_bom_data, save_matches, load_matches,
+    get_session_id, load_bom_data, save_matches, load_matches,
     save_mpnfree, load_mpnfree,
-    save_selections, load_selections
+    save_selections, load_selections,
+    save_to_history
 )
-from services.match_service import find_ipn_batch, find_ipn_single
+from services.match_service import find_ipn_batch, find_ipn_single, filter_customer_specific
 from services import search_service
 from services.ai_service import assess_mpnfree_batch_local
 
@@ -59,6 +60,10 @@ def find_ipn():
             matches_dict[str(r['row_index'])] = r
 
         save_matches(matches_dict)
+
+        # Update history entry with match state
+        session_id = get_session_id()
+        save_to_history(session_id, bom_data.get('name', ''), bom_data.get('klant_nr', ''))
 
         matched = sum(1 for r in results if r['confidence'] != 'none')
         param_matched = sum(1 for r in results if r.get('search_method') == 'parameterized')
@@ -147,6 +152,11 @@ def manual_search():
             terms = query.split()
             suggestions = search_service.search_by_description(terms)
 
+        # Filter customer-specific IPNs (7xx, 9xx, 500xx)
+        bom_data = load_bom_data()
+        selected_klant_nr = bom_data.get('klant_nr', '') if bom_data else ''
+        suggestions = filter_customer_specific(suggestions, selected_klant_nr)
+
         suggestions = suggestions[:20]
 
         # Build a result dict compatible with matchResults
@@ -208,6 +218,10 @@ def assess_mpnfree():
             mpnfree_dict[str(r['index'])] = r
 
         save_mpnfree(mpnfree_dict)
+
+        # Update history entry with mpnfree state
+        session_id = get_session_id()
+        save_to_history(session_id, bom_data.get('name', ''), bom_data.get('klant_nr', ''))
 
         return jsonify({
             'success': True,

@@ -634,6 +634,80 @@ const klantenReady = loadKlanten().then(() => initCustomerSelector());
 // Process BOM
 // ========================================================================
 
+async function checkBackNavigation() {
+    const params = new URLSearchParams(window.location.search);
+    if (!params.has('back')) return;
+
+    // Remove query param from URL without reload
+    window.history.replaceState({}, '', '/');
+
+    showLoading();
+    try {
+        const data = await apiCall('/api/upload-state', { method: 'GET' });
+        if (!data.has_state) return;
+
+        // Restore state variables
+        currentHeaders = data.headers;
+        currentRows = data.preview_rows;
+        selectedHeaderRow = data.header_row || 0;
+        rowRange = {
+            start: data.start_row != null ? data.start_row : null,
+            end: data.end_row != null ? data.end_row : null,
+        };
+
+        // Show file info
+        document.getElementById('fileName').textContent = data.filename;
+        document.getElementById('fileRowCount').textContent = `(${data.total_rows} rows)`;
+        document.getElementById('fileInfo').style.display = 'block';
+
+        // Sheet selector
+        if (data.sheets && data.sheets.length > 1) {
+            const select = document.getElementById('sheetSelect');
+            select.innerHTML = data.sheets.map(s =>
+                `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
+            ).join('');
+            document.getElementById('sheetSelector').style.display = 'block';
+            if (data.sheet_name) select.value = data.sheet_name;
+        }
+
+        // Row range inputs
+        updateRowRangeInputs();
+        document.getElementById('rowRangeSection').style.display = 'block';
+
+        // Render preview and mapping
+        renderPreview();
+        renderMapping();
+
+        // Apply stored column mapping
+        if (data.column_mapping && Object.keys(data.column_mapping).length > 0) {
+            applyStoredMapping(data.column_mapping);
+        }
+
+        // Show all sections
+        document.getElementById('previewSection').style.display = 'block';
+        document.getElementById('mappingSection').style.display = 'block';
+        const customerSection = document.getElementById('customerSection');
+        if (customerSection) customerSection.style.display = 'block';
+        document.getElementById('processSection').style.display = 'block';
+
+        // Restore customer selection
+        if (data.klant_nr) {
+            await restoreCustomer(data.klant_nr);
+        }
+
+        toast.info('Restored previous session');
+    } catch (e) {
+        // Silently fail - user gets a fresh upload page
+    } finally {
+        hideLoading();
+    }
+}
+
+// Check for back navigation after customer list is ready
+klantenReady.then(() => checkBackNavigation());
+
+// ========================================================================
+
 async function processBom() {
     // Collect mapping (supports multiple columns per standard field)
     const mapping = {};

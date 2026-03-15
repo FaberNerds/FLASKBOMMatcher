@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+
+{% block title %}BOM Matcher - History{% endblock %}
+
+{% block topbar_actions %}
+<a href="/" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">&lt;&lt; Back</a>
+{% endblock %}
+
+{% block content %}
+<div style="max-width: 1000px; margin: 0 auto;">
+    <h2 style="margin-bottom: 24px;">BOM History</h2>
+
+    <div class="card">
+        <div class="card-header">
+            <h3 class="card-title">Previously Processed BOMs</h3>
+            <p class="card-subtitle">Load a previous BOM to continue working on it or re-export (max 100 entries)</p>
+        </div>
+        <div class="card-body" style="padding: 0;">
+            <div style="overflow-x: auto;">
+                <table class="data-table" id="historyTable">
+                    <thead>
+                        <tr>
+                            <th>BOM Name</th>
+                            <th>Customer</th>
+                            <th>Rows</th>
+                            <th>Status</th>
+                            <th>Last Updated</th>
+                            <th style="width: 160px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="historyBody">
+                        <tr>
+                            <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="{{ url_for('static', filename='js/history.js') }}"></script>
+{% endblock %}

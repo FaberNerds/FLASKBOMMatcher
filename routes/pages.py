@@ -23,3 +23,9 @@ def process_page():
 def settings_page():
     """Screen 3: Settings."""
     return render_template('settings.html')
+
+
+@pages_bp.route('/history')
+def history_page():
+    """Screen 4: BOM History."""
+    return render_template('history.html')

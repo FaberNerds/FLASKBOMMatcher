@@ -47,14 +47,14 @@ def _get_icp_klant_nr() -> str:
     return _icp_klant_nr
 
 
-def _filter_customer_specific(
+def filter_customer_specific(
     suggestions: List[Dict[str, Any]],
     selected_klant_nr: str = "",
 ) -> List[Dict[str, Any]]:
     """Filter out customer-specific IPNs that don't match the selected customer.
 
     Rules:
-    - IPNs starting with '7': customer-specific, exclude unless KlantNr matches
+    - IPNs starting with '7' or '9': customer-specific, exclude unless KlantNr matches
     - IPNs starting with '500': ICP Systems B.V. specific, exclude unless ICP is selected
     """
     if not suggestions:
@@ -67,7 +67,7 @@ def _filter_customer_specific(
         ipn = str(s.get('FaberNr', '')).strip()
         klant_nr = str(s.get('KlantNr', '')).strip()
 
-        if ipn.startswith('7'):
+        if ipn.startswith('7') or ipn.startswith('9'):
             # Customer-specific: only include if customer matches
             if selected_klant_nr and klant_nr == selected_klant_nr:
                 filtered.append(s)
@@ -96,7 +96,7 @@ def _rank_suggestions(
     6. Lowest Kostprijs first
     7. Highest similarity score as final tiebreaker
     """
-    suggestions = _filter_customer_specific(suggestions, selected_klant_nr)
+    suggestions = filter_customer_specific(suggestions, selected_klant_nr)
 
     if not suggestions or len(suggestions) <= 1:
         return suggestions

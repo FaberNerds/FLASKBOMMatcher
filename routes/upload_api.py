@@ -11,7 +11,9 @@ import config
 from services.file_service import allowed_file, read_file, get_sheet_names, get_file_preview
 from services.session_service import (
     get_session_id, save_bom_data, load_bom_data,
-    save_mapping_history, load_mapping_history
+    save_mapping_history, load_mapping_history,
+    load_matches, load_mpnfree, load_selections,
+    save_to_history
 )
 from services.klant_cache_service import get_all_klanten
 
@@ -167,6 +169,10 @@ def set_mapping():
         'end_row': bom_data.get('end_row'),
     })
 
+    # Auto-store in BOM history
+    session_id = get_session_id()
+    save_to_history(session_id, bom_data.get('name', ''), klant_nr)
+
     return jsonify({'success': True})
 
 
@@ -182,5 +188,36 @@ def get_bom_data():
         'rows': bom_data.get('rows', []),
         'column_mapping': bom_data.get('column_mapping', {}),
         'total_rows': len(bom_data.get('rows', [])),
-        'name': bom_data.get('name', '')
+        'name': bom_data.get('name', ''),
+        'matches': load_matches() or {},
+        'mpnfree': load_mpnfree() or {},
+        'selections': load_selections() or {},
+    })
+
+
+@upload_bp.route('/upload-state', methods=['GET'])
+def get_upload_state():
+    """Return current upload state for back-navigation restoration."""
+    bom_data = load_bom_data()
+    if not bom_data or not bom_data.get('name'):
+        return jsonify({'has_state': False})
+
+    sheets = []
+    file_path = bom_data.get('file_path')
+    if file_path and os.path.exists(file_path):
+        sheets = get_sheet_names(file_path)
+
+    return jsonify({
+        'has_state': True,
+        'filename': bom_data.get('name', ''),
+        'headers': bom_data.get('headers', []),
+        'preview_rows': bom_data.get('rows', [])[:50],
+        'total_rows': len(bom_data.get('rows', [])),
+        'sheets': sheets,
+        'header_row': bom_data.get('header_row', 0),
+        'sheet_name': bom_data.get('sheet_name'),
+        'start_row': bom_data.get('start_row'),
+        'end_row': bom_data.get('end_row'),
+        'column_mapping': bom_data.get('column_mapping', {}),
+        'klant_nr': bom_data.get('klant_nr', ''),
     })
