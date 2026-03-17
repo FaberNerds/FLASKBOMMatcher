@@ -177,6 +177,12 @@ function setupSyncScroll() {
 function renderTables() {
     if (!bomData) return;
 
+    // Preserve scroll positions before rebuilding the DOM
+    const leftScroll = document.getElementById('leftScroll');
+    const rightScroll = document.getElementById('rightScroll');
+    const paramsScroll = document.getElementById('paramsScroll');
+    const savedScrollTop = leftScroll ? leftScroll.scrollTop : 0;
+
     const mapping = bomData.column_mapping || {};
     const rows = bomData.rows || [];
 
@@ -345,6 +351,11 @@ function renderTables() {
 
     // Persist UI state for reload
     saveUiState();
+
+    // Restore scroll positions after DOM rebuild
+    if (leftScroll) leftScroll.scrollTop = savedScrollTop;
+    if (rightScroll) rightScroll.scrollTop = savedScrollTop;
+    if (paramsScroll) paramsScroll.scrollTop = savedScrollTop;
 }
 
 function applyDescColumnWidth(w) {
@@ -824,9 +835,9 @@ function showRowDetailModal(rowIndex) {
     modalEl.className = 'modal modal-fullscreen';
 
     modalEl.innerHTML = `
-        <div class="modal-header" style="display: flex; justify-content: space-between; align-items: center;">
-            <h3 class="modal-title">Row ${rowIndex + 1} Details</h3>
+        <div class="modal-header" style="display: flex; align-items: center; gap: 12px;">
             <button class="btn btn-outline btn-sm" onclick="closeRowDetailModal()">Close</button>
+            <h3 class="modal-title">Row ${rowIndex + 1} Details</h3>
         </div>
         <div class="modal-body">${bodyHtml}</div>
     `;
