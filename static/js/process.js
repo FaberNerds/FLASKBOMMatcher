@@ -170,6 +170,26 @@ function setupSyncScroll() {
     }
 }
 
+// Capture the current scroll position BEFORE an async action so it can be restored after
+// renderTables() rebuilds the DOM (the rebuild + select focus change otherwise jumps scroll).
+function captureScroll() {
+    const l = document.getElementById('leftScroll');
+    return l ? { top: l.scrollTop, left: l.scrollLeft } : null;
+}
+
+function restoreScroll(saved) {
+    if (!saved) return;
+    // rAF so we restore after syncRowHeights()'s height reset/relayout has settled.
+    requestAnimationFrame(() => {
+        const left = document.getElementById('leftScroll');
+        const right = document.getElementById('rightScroll');
+        const params = document.getElementById('paramsScroll');
+        if (left) { left.scrollTop = saved.top; left.scrollLeft = saved.left; }
+        if (right) right.scrollTop = saved.top;   // vertical is synced; horizontal is per-pane
+        if (params) params.scrollTop = saved.top;
+    });
+}
+
 // ========================================================================
 // Render Tables
 // ========================================================================
@@ -514,6 +534,7 @@ function renderMpnfreeDropdown(rowIndex) {
 }
 
 async function overrideMpnfree(rowIndex, value) {
+    const saved = captureScroll();  // before the async gap — true position
     const strIdx = String(rowIndex);
     if (!selections[strIdx]) selections[strIdx] = {};
     selections[strIdx].mpnfree = value;
@@ -524,6 +545,7 @@ async function overrideMpnfree(rowIndex, value) {
             body: JSON.stringify({ row_index: rowIndex, mpnfree: value })
         });
         renderTables();
+        restoreScroll(saved);
     } catch (e) {
         // toast shown
     }
@@ -534,11 +556,13 @@ async function overrideMpnfree(rowIndex, value) {
 // ========================================================================
 
 async function selectMpnfree() {
+    const saved = captureScroll();  // before the async gap — true position
     // Toggle off if already showing
     if (Object.keys(mpnfreeResults).length > 0) {
         await apiCall('/api/match/mpnfree/clear', { method: 'POST' });
         mpnfreeResults = {};
         renderTables();
+        restoreScroll(saved);
         return;
     }
     showLoading();
@@ -553,6 +577,7 @@ async function selectMpnfree() {
             }
         }
         renderTables();
+        restoreScroll(saved);
         toast.success(`MPNfree assessment: ${data.mpnfree_count}/${data.total} parts marked as MPNfree`);
     } catch (e) {
         // toast shown

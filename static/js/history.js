@@ -66,6 +66,9 @@ async function deleteEntry(sessionId) {
             method: 'POST',
             body: JSON.stringify({ session_id: sessionId })
         });
+        // Clear cached process-page client state so it can't resurrect old UI after a delete.
+        sessionStorage.removeItem('processUiState');
+        sessionStorage.removeItem('processBomName');
         toast.success('History entry deleted');
         loadHistory();
     } catch (e) {

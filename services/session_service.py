@@ -168,6 +168,20 @@ def load_mapping_history(filename: str) -> dict | None:
         return None
 
 
+def delete_mapping_history(filename: str) -> None:
+    """Remove stored settings for a filename so re-upload no longer auto-restores them."""
+    if not filename or not MAPPING_HISTORY_PATH.exists():
+        return
+    try:
+        with open(MAPPING_HISTORY_PATH, 'r') as f:
+            history = json.load(f)
+    except Exception:
+        return
+    if history.pop(filename, None) is not None:
+        with open(MAPPING_HISTORY_PATH, 'w') as f:
+            json.dump(history, f)
+
+
 def clear_process_data() -> bool:
     """Clear process-page data (matches, mpnfree, selections) for the current session.
 
@@ -264,12 +278,25 @@ def load_history() -> list:
 
 
 def delete_history_entry(target_session_id: str) -> None:
-    """Remove a specific history entry and its files."""
+    """Remove a specific history entry and fully reset its state (complete start-over)."""
     history = load_history()
+    entry = next((h for h in history if h['session_id'] == target_session_id), None)
     history = [h for h in history if h['session_id'] != target_session_id]
     with open(HISTORY_PATH, 'w') as f:
         json.dump(history, f)
-    _cleanup_history_files(target_session_id)
+
+    # Delete every file for this session, including the raw uploaded file.
+    _delete_all_session_files(target_session_id)
+
+    # Drop the filename-keyed mapping so re-upload no longer auto-restores it.
+    if entry:
+        delete_mapping_history(entry.get('bom_name', ''))
+
+    # If we just deleted the active session, reset session flags so the next upload starts fresh.
+    if session.get('session_id') == target_session_id:
+        session.pop('bom_loaded', None)
+        session.pop('bom_name', None)
+        session.modified = True
 
 
 def load_history_session(target_session_id: str) -> bool:
@@ -300,6 +327,19 @@ def load_history_session(target_session_id: str) -> bool:
             pass
 
     return True
+
+
+def _delete_all_session_files(target_session_id: str) -> None:
+    """Delete all data + raw upload files for a session (used on explicit delete).
+
+    Unlike _cleanup_history_files, this has no current-session guard and also removes
+    the raw uploaded file ({session_id}_{filename}), giving a complete start-over.
+    """
+    for path in config.UPLOAD_FOLDER.glob(f"{target_session_id}_*"):
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def _cleanup_history_files(target_session_id: str) -> None:
