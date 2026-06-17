@@ -72,6 +72,27 @@
             </div>
         </div>
 
+        <!-- Previous Version (Exact) -->
+        <div id="previousBomSection" style="display: none; margin-top: 24px;">
+            <h3 style="font-size: 14px; margin-bottom: 12px;">Previous Version (Exact)</h3>
+            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
+                Enter the article number of the previous board version to fetch its BOM from Exact.
+                When loaded, Process BOM matches this new BOM against the old one (reusing already-purchased
+                Faber articles) instead of the live ERP catalog.
+            </p>
+            <div style="display: flex; gap: 8px; align-items: center; max-width: 480px;">
+                <input type="text" id="previousArticleId" class="form-input" placeholder="e.g. 300001234"
+                       autocomplete="off" style="flex: 1;"
+                       onkeydown="if(event.key==='Enter'){event.preventDefault();fetchPreviousBom();}">
+                <button class="btn btn-primary" id="fetchPreviousBtn" onclick="fetchPreviousBom()">Fetch</button>
+            </div>
+            <div id="previousBomInfo" style="display: none; margin-top: 10px; padding: 8px 12px; background: var(--color-success-light); border-radius: var(--radius-md); align-items: center; gap: 8px;">
+                <span style="font-size: 16px;">✅</span>
+                <span id="previousBomInfoText"></span>
+                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px; margin-left: auto;" onclick="clearPreviousBom()">✕ Clear</button>
+            </div>
+        </div>
+
         <!-- Column Mapping -->
         <div id="mappingSection" style="display: none; margin-top: 24px;">
             <h3 style="font-size: 14px; margin-bottom: 12px;">Column Mapping</h3>

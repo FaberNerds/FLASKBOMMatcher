@@ -812,6 +812,54 @@
 }
 
 /* ========================================
+   PREVIOUS-BOM CHECKMARK + TOOLTIP
+   ======================================== */
+
+.prevbom-check {
+    color: #16a34a;
+    font-weight: 700;
+    cursor: default;
+    margin-left: 4px;
+}
+
+.prevbom-tooltip {
+    position: fixed;
+    z-index: 10000;
+    max-width: 420px;
+    background: #ffffff;
+    color: var(--text-color, #1f2937);
+    border: 1px solid var(--border-color, #d1d5db);
+    border-left: 3px solid #16a34a;
+    border-radius: var(--radius-md, 6px);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+    padding: 10px 12px;
+    font-size: 12px;
+    pointer-events: none;
+}
+
+.prevbom-tooltip-title {
+    font-weight: 700;
+    color: #16a34a;
+    margin-bottom: 6px;
+}
+
+.prevbom-tooltip-table {
+    border-collapse: collapse;
+}
+
+.prevbom-tooltip-table td {
+    padding: 2px 8px 2px 0;
+    vertical-align: top;
+    word-break: break-word;
+}
+
+.prevbom-tooltip-label {
+    color: var(--text-muted, #6b7280);
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* ========================================
    SCORE BAR
    ======================================== */
 

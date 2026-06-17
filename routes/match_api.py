@@ -12,6 +12,9 @@ from services.session_service import (
     save_to_history
 )
 from services.match_service import find_ipn_batch, find_ipn_single, filter_customer_specific
+from services.previous_bom_match_service import (
+    match_against_previous_bom, match_previous_single,
+)
 from services import search_service
 from services.ai_service import assess_mpnfree_batch_local
 
@@ -34,25 +37,38 @@ def find_ipn():
     if not rows:
         return jsonify({'error': 'BOM has no rows'}), 400
 
-    # Build per-row mpnfree flags from session (AI + user overrides)
-    mpnfree = load_mpnfree() or {}
-    selections = load_selections() or {}
-
-    mpnfree_flags = {}
-    for i in range(len(rows)):
-        str_idx = str(i)
-        sel = selections.get(str_idx, {})
-        if sel.get('mpnfree') is not None:
-            mpnfree_flags[str_idx] = sel['mpnfree']
-        elif str_idx in mpnfree:
-            mpnfree_flags[str_idx] = mpnfree[str_idx].get('mpnfree', False)
-
     selected_klant_nr = bom_data.get('klant_nr', '')
-    mpnfree_count = sum(1 for v in mpnfree_flags.values() if v)
-    logger.info(f"=== IPN SEARCH START === {len(rows)} rows, {mpnfree_count} MPNfree, klant='{selected_klant_nr}'")
+    previous_bom = bom_data.get('previous_bom')
 
     try:
-        results = find_ipn_batch(rows, mapping, mpnfree_flags=mpnfree_flags, selected_klant_nr=selected_klant_nr)
+        if previous_bom:
+            # Previous-BOM mode: match the new BOM against the old (Exact) BOM instead
+            # of the live ERP catalog, and force MPNfree to "No" for every row.
+            logger.info(
+                f"=== PREVIOUS-BOM MATCH START === {len(rows)} new rows vs "
+                f"{len(previous_bom)} old parts (article {bom_data.get('previous_article_id', '')})"
+            )
+            # MPNfree is output-only in this mode (not used for matching) — leave it untouched.
+            results = match_against_previous_bom(
+                rows, mapping, previous_bom, selected_klant_nr=selected_klant_nr
+            )
+        else:
+            # Build per-row mpnfree flags from session (AI + user overrides)
+            mpnfree = load_mpnfree() or {}
+            selections = load_selections() or {}
+
+            mpnfree_flags = {}
+            for i in range(len(rows)):
+                str_idx = str(i)
+                sel = selections.get(str_idx, {})
+                if sel.get('mpnfree') is not None:
+                    mpnfree_flags[str_idx] = sel['mpnfree']
+                elif str_idx in mpnfree:
+                    mpnfree_flags[str_idx] = mpnfree[str_idx].get('mpnfree', False)
+
+            mpnfree_count = sum(1 for v in mpnfree_flags.values() if v)
+            logger.info(f"=== IPN SEARCH START === {len(rows)} rows, {mpnfree_count} MPNfree, klant='{selected_klant_nr}'")
+            results = find_ipn_batch(rows, mapping, mpnfree_flags=mpnfree_flags, selected_klant_nr=selected_klant_nr)
 
         # Convert to dict keyed by row index for storage
         matches_dict = {}
@@ -99,7 +115,10 @@ def find_ipn_single_route():
     if row_index < 0 or row_index >= len(rows):
         return jsonify({'error': 'Invalid row index'}), 400
 
-    # Check mpnfree status for this row
+    selected_klant_nr = bom_data.get('klant_nr', '')
+    previous_bom = bom_data.get('previous_bom')
+
+    # Check mpnfree status for this row (ignored in previous-BOM mode)
     mpnfree = load_mpnfree() or {}
     selections_data = load_selections() or {}
     str_idx = str(row_index)
@@ -110,11 +129,15 @@ def find_ipn_single_route():
     elif str_idx in mpnfree:
         is_mpnfree = mpnfree[str_idx].get('mpnfree', False)
 
-    selected_klant_nr = bom_data.get('klant_nr', '')
-    logger.info(f"Re-search row {row_index}, mpnfree={is_mpnfree}, klant='{selected_klant_nr}'")
+    logger.info(f"Re-search row {row_index}, mpnfree={is_mpnfree}, klant='{selected_klant_nr}', previous_bom={bool(previous_bom)}")
 
     try:
-        result = find_ipn_single(row_index, rows[row_index], mapping, is_mpnfree=is_mpnfree, selected_klant_nr=selected_klant_nr)
+        if previous_bom:
+            result = match_previous_single(
+                row_index, rows[row_index], mapping, previous_bom, selected_klant_nr=selected_klant_nr
+            )
+        else:
+            result = find_ipn_single(row_index, rows[row_index], mapping, is_mpnfree=is_mpnfree, selected_klant_nr=selected_klant_nr)
 
         logger.info(f"Row {row_index} result: {result['search_method']}, {result['confidence']}, {len(result['suggestions'])} suggestions")
 

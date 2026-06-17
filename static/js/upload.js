@@ -142,10 +142,15 @@ async function uploadFile(file) {
         }
 
         document.getElementById('previewSection').style.display = 'block';
+        const previousBomSection = document.getElementById('previousBomSection');
+        if (previousBomSection) previousBomSection.style.display = 'block';
         document.getElementById('mappingSection').style.display = 'block';
         const customerSection = document.getElementById('customerSection');
         if (customerSection) customerSection.style.display = 'block';
         document.getElementById('processSection').style.display = 'flex';
+
+        // Restore a previously fetched previous-version BOM (if any)
+        restorePreviousBom();
 
         // Restore customer selection if previous settings exist
         if (prev && prev.klant_nr) {
@@ -688,10 +693,15 @@ async function checkBackNavigation() {
 
         // Show all sections
         document.getElementById('previewSection').style.display = 'block';
+        const previousBomSection = document.getElementById('previousBomSection');
+        if (previousBomSection) previousBomSection.style.display = 'block';
         document.getElementById('mappingSection').style.display = 'block';
         const customerSection = document.getElementById('customerSection');
         if (customerSection) customerSection.style.display = 'block';
         document.getElementById('processSection').style.display = 'flex';
+
+        // Restore a previously fetched previous-version BOM (if any)
+        restorePreviousBom();
 
         // Restore customer selection
         if (data.klant_nr) {
@@ -728,6 +738,70 @@ async function clearProcessData() {
         toast.success('Process data cleared — BOM will be processed fresh');
     } catch (e) {
         // toast shown by apiCall
+    }
+}
+
+// ========================================================================
+// Previous Version (Exact) BOM
+// ========================================================================
+
+function showPreviousBomInfo(text) {
+    const info = document.getElementById('previousBomInfo');
+    const txt = document.getElementById('previousBomInfoText');
+    if (txt) txt.textContent = text;
+    if (info) info.style.display = 'flex';
+}
+
+async function fetchPreviousBom() {
+    const input = document.getElementById('previousArticleId');
+    const articleId = input ? input.value.trim() : '';
+    if (!articleId) {
+        toast.warning('Enter a previous article number first');
+        return;
+    }
+    showLoading();
+    try {
+        const data = await apiCall('/api/exact/fetch-previous', {
+            method: 'POST',
+            body: JSON.stringify({ article_id: articleId })
+        });
+        const desc = data.description ? ` — ${data.description}` : '';
+        showPreviousBomInfo(`Previous BOM ${data.article_id}${desc}: ${data.total_rows} components loaded. ` +
+            `Process BOM will match against this BOM.`);
+        toast.success(`Previous BOM ${data.article_id} loaded (${data.total_rows} components)`);
+    } catch (e) {
+        // toast shown by apiCall
+    } finally {
+        hideLoading();
+    }
+}
+
+async function clearPreviousBom() {
+    try {
+        await apiCall('/api/exact/clear-previous', { method: 'POST' });
+        const info = document.getElementById('previousBomInfo');
+        if (info) info.style.display = 'none';
+        const input = document.getElementById('previousArticleId');
+        if (input) input.value = '';
+        toast.info('Previous BOM cleared — normal ERP matching will be used');
+    } catch (e) {
+        // toast shown by apiCall
+    }
+}
+
+async function restorePreviousBom() {
+    try {
+        const data = await apiCall('/api/exact/previous-bom', { method: 'GET' });
+        const components = data.components || [];
+        if (components.length > 0) {
+            const input = document.getElementById('previousArticleId');
+            if (input) input.value = data.article_id || '';
+            const desc = data.description ? ` — ${data.description}` : '';
+            showPreviousBomInfo(`Previous BOM ${data.article_id || ''}${desc}: ${components.length} components loaded. ` +
+                `Process BOM will match against this BOM.`);
+        }
+    } catch (e) {
+        // No previous BOM — ignore
     }
 }
 

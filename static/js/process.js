@@ -19,6 +19,10 @@ let modalSuggestions = [];
 let modalRowIndex = null;
 let descColumnWidth = null;
 
+// Previous-version (Exact) BOM, keyed by FaberNr → full old-BOM line.
+// Drives the green "on old BOM" checkmark and its hover tooltip.
+let previousBomByFaberNr = new Map();
+
 // ========================================================================
 // Zoom Control
 // ========================================================================
@@ -109,6 +113,9 @@ async function loadBomData() {
         const data = await apiCall('/api/bom-data');
         bomData = data;
 
+        // Load the previous-version (Exact) BOM for the green-checkmark feature
+        await loadPreviousBom();
+
         // Restore server-side state (matches, mpnfree, selections)
         if (data.matches && Object.keys(data.matches).length > 0) {
             matchResults = data.matches;
@@ -133,14 +140,109 @@ async function loadBomData() {
 
         document.getElementById('bomName').textContent = data.name || 'Untitled';
         document.getElementById('bomStats').textContent = `${data.total_rows} rows`;
+
         renderTables();
         setupSyncScroll();
         window.addEventListener('resize', syncRowHeights);
+
+        // In previous-BOM mode, run the match automatically when none exists yet
+        // (pressing "Process BOM" is expected to match against the old BOM right away).
+        if (previousBomMode() && Object.keys(matchResults).length === 0 &&
+            bomData && (bomData.total_rows || 0) > 0) {
+            await findIpn();
+        }
     } catch (e) {
         toast.error('Failed to load BOM data. Go back and upload a file.');
     } finally {
         hideLoading();
     }
+}
+
+// ========================================================================
+// Previous-version (Exact) BOM — green checkmark + hover tooltip
+// ========================================================================
+
+async function loadPreviousBom() {
+    previousBomByFaberNr = new Map();
+    try {
+        const data = await apiCall('/api/exact/previous-bom', { method: 'GET' });
+        for (const comp of (data.components || [])) {
+            const fn = String(comp.FaberNr || '').trim();
+            if (fn) previousBomByFaberNr.set(fn, comp);
+        }
+    } catch (e) {
+        // No previous BOM loaded — checkmarks simply won't appear.
+    }
+}
+
+function isOnPreviousBom(fabernr) {
+    if (!fabernr || previousBomByFaberNr.size === 0) return false;
+    return previousBomByFaberNr.has(String(fabernr).trim());
+}
+
+/** Return a green checkmark badge (with hover handlers) when the FaberNr is on the old BOM. */
+function renderPreviousBomCheck(fabernr) {
+    if (!isOnPreviousBom(fabernr)) return '';
+    const fn = escapeHtml(String(fabernr).trim());
+    return ` <span class="prevbom-check" data-fabernr="${fn}" ` +
+        `onmouseenter="showPrevBomTooltip(this)" onmouseleave="hidePrevBomTooltip()" ` +
+        `title="On previous BOM">✓</span>`;
+}
+
+function _getPrevBomTooltipEl() {
+    let el = document.getElementById('prevBomTooltip');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'prevBomTooltip';
+        el.className = 'prevbom-tooltip';
+        el.style.display = 'none';
+        document.body.appendChild(el);
+    }
+    return el;
+}
+
+function showPrevBomTooltip(badge) {
+    const fabernr = badge.getAttribute('data-fabernr');
+    const comp = previousBomByFaberNr.get(String(fabernr).trim());
+    if (!comp) return;
+
+    const fields = [
+        ['FaberNr', comp.FaberNr],
+        ['Description', comp.Description],
+        ['Manufacturer', comp.Manufacturer],
+        ['MPN', comp.MPN],
+        ['Quantity', comp.Quantity],
+        ['Mounting', comp.Mounting],
+        ['Refdes', comp.Refdes],
+    ];
+    let rows = fields.map(([label, val]) =>
+        `<tr><td class="prevbom-tooltip-label">${escapeHtml(label)}</td>` +
+        `<td>${escapeHtml(String(val == null ? '' : val))}</td></tr>`
+    ).join('');
+
+    const el = _getPrevBomTooltipEl();
+    el.innerHTML = `<div class="prevbom-tooltip-title">On previous BOM</div>` +
+        `<table class="prevbom-tooltip-table">${rows}</table>`;
+    el.style.display = 'block';
+
+    // Position near the badge, kept within the viewport.
+    const rect = badge.getBoundingClientRect();
+    const ttRect = el.getBoundingClientRect();
+    let left = rect.left;
+    let top = rect.bottom + 6;
+    if (left + ttRect.width > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - ttRect.width - 8);
+    }
+    if (top + ttRect.height > window.innerHeight - 8) {
+        top = Math.max(8, rect.top - ttRect.height - 6);
+    }
+    el.style.left = left + 'px';
+    el.style.top = top + 'px';
+}
+
+function hidePrevBomTooltip() {
+    const el = document.getElementById('prevBomTooltip');
+    if (el) el.style.display = 'none';
 }
 
 // ========================================================================
@@ -215,7 +317,7 @@ function renderTables() {
         }
     }
 
-    const hasMpnfree = Object.keys(mpnfreeResults).length > 0;
+    const hasMpnfree = previousBomMode() || Object.keys(mpnfreeResults).length > 0;
 
     // --- Left Table Header ---
     const leftHead = document.getElementById('leftTableHead');
@@ -324,7 +426,7 @@ function renderTables() {
             const auto = displayItem;
             const descHtml = renderHighlightedDescription(auto, match);
 
-            rightHtml += `<td style="font-family: var(--font-family-mono); font-size: 11px;">${escapeHtml(fabernr)}</td>`;
+            rightHtml += `<td style="font-family: var(--font-family-mono); font-size: 11px;">${escapeHtml(fabernr)}${renderPreviousBomCheck(fabernr)}</td>`;
             rightHtml += `<td title="${escapeHtml(auto.Omschrijving || '')}">${descHtml}</td>`;
             rightHtml += `<td>${escapeHtml(auto.Manufacturer || '')}</td>`;
             rightHtml += `<td>${renderMpnHighlights(auto, match, row, mapping)}</td>`;
@@ -506,6 +608,12 @@ function setupColumnResize() {
 // ========================================================================
 // MPNfree Dropdown Rendering
 // ========================================================================
+
+// Previous-BOM mode: matching is driven by the old BOM. MPNfree is output-only here
+// (it flows to the Excel export) and stays editable, defaulting to No.
+function previousBomMode() {
+    return previousBomByFaberNr.size > 0;
+}
 
 function getMpnfreeValue(rowIndex) {
     const strIdx = String(rowIndex);
@@ -772,7 +880,7 @@ function showRowDetailModal(rowIndex) {
     const strIdx = String(rowIndex);
     const match = matchResults[strIdx];
     const suggestions = (match && match.suggestions) ? match.suggestions : [];
-    const hasMpnfree = Object.keys(mpnfreeResults).length > 0;
+    const hasMpnfree = previousBomMode() || Object.keys(mpnfreeResults).length > 0;
 
     // Build left side: customer BOM details
     const mappedCols = [];
@@ -1006,7 +1114,7 @@ function buildAlternativesTable(suggestions, rowIndex) {
         const fabernr = escapeHtml(s.FaberNr || '');
 
         html += `<tr>
-            <td><strong>${fabernr}</strong></td>
+            <td><strong>${fabernr}</strong>${renderPreviousBomCheck(s.FaberNr || '')}</td>
             <td title="${escapeHtml(s.Omschrijving || '')}">${descHtml}</td>
             <td>${escapeHtml(s.Manufacturer || '')}</td>
             <td><span class="mpn-clickable" title="Click: Copy | Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(s.MPN || '')}</span></td>
