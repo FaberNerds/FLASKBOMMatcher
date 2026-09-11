@@ -62,7 +62,12 @@ root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 root_logger.handlers.clear()
 
-# Always log to stdout
+# Always log to stdout.
+# On Windows stdout defaults to the console code page (cp1252), which cannot
+# encode characters such as "→" used in log lines; logging would then drop the
+# line and print a "Logging error" traceback. Force UTF-8 and never raise.
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 stream_handler = logging.StreamHandler(sys.stdout)
 stream_handler.setLevel(logging.DEBUG if config.DEBUG_MODE else logging.INFO)
 stream_handler.setFormatter(_ShortNameFormatter(log_format, datefmt=log_datefmt))
@@ -71,7 +76,7 @@ root_logger.addHandler(stream_handler)
 if not config.DEBUG_MODE:
     # Production: also log to file
     _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server.log')
-    file_handler = RotatingFileHandler(_log_path, maxBytes=10*1024*1024, backupCount=5)
+    file_handler = RotatingFileHandler(_log_path, maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
     file_handler.setFormatter(_ShortNameFormatter(log_format, datefmt=log_datefmt))
     file_handler.setLevel(logging.INFO)
     root_logger.addHandler(file_handler)
