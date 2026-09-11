@@ -12,12 +12,11 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from services.package_tags_service import PACKAGE_CODES
+
 logger = logging.getLogger(__name__)
 
-VALID_PACKAGES = {
-    "0201", "0402", "0603", "0805", "1206", "1210",
-    "1812", "2010", "2512", "01005", "2220",
-}
+VALID_PACKAGES = set(PACKAGE_CODES)
 
 _ALIAS_DIR = Path.home() / ".bommatcher"
 _ALIAS_FILE = _ALIAS_DIR / "package_aliases.json"

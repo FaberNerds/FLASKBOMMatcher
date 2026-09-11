@@ -8,6 +8,7 @@ from flask import Blueprint, request, jsonify
 from services.search_service import test_connection
 from services.category_index_service import build_index, get_index_stats
 from services.package_alias_service import get_aliases, add_alias, remove_alias
+from services.package_tags_service import get_package_tags, save_package_tags, reset_package_tags
 
 logger = logging.getLogger(__name__)
 
@@ -87,4 +88,36 @@ def delete_package_alias():
         return jsonify({'success': False, 'error': 'Alias not found'}), 404
     except Exception as e:
         logger.error(f"delete_package_alias error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@settings_bp.route('/settings/package-tags', methods=['GET'])
+def list_package_tags():
+    """Return configured package prefix/suffix tags."""
+    try:
+        return jsonify({'success': True, **get_package_tags()})
+    except Exception as e:
+        logger.error(f"list_package_tags error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@settings_bp.route('/settings/package-tags', methods=['POST'])
+def update_package_tags():
+    """Save package prefix/suffix tags (lists or comma-separated strings)."""
+    try:
+        data = request.get_json(force=True) or {}
+        tags = save_package_tags(data.get('prefixes', []), data.get('suffixes', []))
+        return jsonify({'success': True, **tags})
+    except Exception as e:
+        logger.error(f"update_package_tags error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@settings_bp.route('/settings/package-tags/reset', methods=['POST'])
+def reset_package_tags_route():
+    """Reset package prefix/suffix tags to defaults."""
+    try:
+        return jsonify({'success': True, **reset_package_tags()})
+    except Exception as e:
+        logger.error(f"reset_package_tags error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500

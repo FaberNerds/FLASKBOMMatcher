@@ -75,6 +75,36 @@
             <span id="aliasResult" style="display: block; margin-top: 8px; font-size: 13px;"></span>
         </div>
     </div>
+
+    <!-- Package Detection Tags -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">Package Detection Tags</h3>
+            <p class="card-subtitle">Letters glued to a package code, e.g. RES1206N &rarr; 1206. Case-insensitive.</p>
+        </div>
+        <div class="card-body">
+            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 12px;">
+                Changing these affects ERP descriptions only after a <strong>Rebuild Index</strong>.
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 10px;">
+                <label style="font-size: 13px;">
+                    <span style="display: block; color: var(--text-muted); margin-bottom: 4px;">Prefixes (comma-separated)</span>
+                    <input type="text" id="packagePrefixes" placeholder="SMD, CASE, RES, CER, CAP"
+                           style="width: 100%; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);">
+                </label>
+                <label style="font-size: 13px;">
+                    <span style="display: block; color: var(--text-muted); margin-bottom: 4px;">Suffixes (comma-separated)</span>
+                    <input type="text" id="packageSuffixes" placeholder="N, L"
+                           style="width: 100%; padding: 6px 10px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);">
+                </label>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button class="btn btn-primary" id="savePackageTagsBtn" onclick="savePackageTags()">Save</button>
+                    <button class="btn btn-outline" onclick="resetPackageTags()">Reset to Defaults</button>
+                    <span id="packageTagsResult" style="font-size: 13px;"></span>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
@@ -220,7 +250,68 @@
         }
     }
 
+    function fillPackageTags(data) {
+        document.getElementById('packagePrefixes').value = (data.prefixes || []).join(', ');
+        document.getElementById('packageSuffixes').value = (data.suffixes || []).join(', ');
+    }
+
+    async function loadPackageTags() {
+        try {
+            const data = await apiCall('/api/settings/package-tags');
+            if (data.success) fillPackageTags(data);
+        } catch (e) {
+            console.error('Failed to load package tags:', e);
+        }
+    }
+
+    async function savePackageTags() {
+        const btn = document.getElementById('savePackageTagsBtn');
+        const result = document.getElementById('packageTagsResult');
+        btn.disabled = true;
+        try {
+            const data = await apiCall('/api/settings/package-tags', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    prefixes: document.getElementById('packagePrefixes').value,
+                    suffixes: document.getElementById('packageSuffixes').value
+                })
+            });
+            if (data.success) {
+                fillPackageTags(data);
+                result.textContent = '✓ Saved';
+                result.style.color = 'var(--color-success)';
+            } else {
+                result.textContent = data.error || 'Failed to save';
+                result.style.color = 'var(--color-danger)';
+            }
+        } catch (e) {
+            result.textContent = e.message;
+            result.style.color = 'var(--color-danger)';
+        }
+        btn.disabled = false;
+    }
+
+    async function resetPackageTags() {
+        const result = document.getElementById('packageTagsResult');
+        try {
+            const data = await apiCall('/api/settings/package-tags/reset', { method: 'POST' });
+            if (data.success) {
+                fillPackageTags(data);
+                result.textContent = '✓ Reset to defaults';
+                result.style.color = 'var(--color-success)';
+            } else {
+                result.textContent = data.error || 'Failed to reset';
+                result.style.color = 'var(--color-danger)';
+            }
+        } catch (e) {
+            result.textContent = e.message;
+            result.style.color = 'var(--color-danger)';
+        }
+    }
+
     loadIndexStats();
     loadAliases();
+    loadPackageTags();
 </script>
 {% endblock %}

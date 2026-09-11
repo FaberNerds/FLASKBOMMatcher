@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from services.db_service import get_connection_context
 from services.package_alias_service import resolve_package_alias
+from services.package_tags_service import find_smd_package
 
 logger = logging.getLogger(__name__)
 
@@ -257,10 +258,10 @@ def _parse_package_from_desc(desc: str) -> Optional[str]:
     alias = resolve_package_alias(desc)
     if alias:
         return alias
-    # Metric footprints: 0402, 0603, 0805, 1206, 1210, 2512, etc.
-    m = re.search(r'\b(0201|0402|0603|0805|1206|1210|1812|2010|2512)\b', desc)
-    if m:
-        return m.group(1)
+    # SMD footprints: 0402, 0603, SMD0805, RES1206N, etc. (configurable prefix/suffix tags)
+    code = find_smd_package(desc)
+    if code:
+        return code
     # Named packages: SOIC-8, SOT-23, QFN-16, TSSOP-56, DIP-8, DPAK, etc.
     m = re.search(r'\b(SO[- ]?\d+|SOIC[- ]?\d+|SOT[- ]?\d+[A-Z]*|QFN[- ]?\d+|QFP[- ]?\d+|'
                   r'TSSOP[- ]?\d+|SSOP[- ]?\d+|MSOP[- ]?\d+|DIP[- ]?\d+|PDIP[- ]?\d+|'

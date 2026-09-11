@@ -17,6 +17,11 @@ from services.category_index_service import (
     normalize_package,
 )
 from services.package_alias_service import resolve_package_alias
+from services.package_tags_service import (
+    PACKAGE_CODES,
+    find_smd_package,
+    get_package_tags,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -25,7 +30,9 @@ logger = logging.getLogger(__name__)
 # Shared regex helpers
 # ---------------------------------------------------------------------------
 
-_SMD_PACKAGES = r'(?:\b|(?<=SMD)|(?<=CER)|(?<=RES)|(?<=CAP))(0201|0402|0603|0805|1206|1210|1812|2010|2512)\b'
+# SMD package detection (0402, SMD0603, RES1206N, ...) lives in
+# package_tags_service so the prefix/suffix letters are configurable.
+_SMD_CODES = set(PACKAGE_CODES)
 _TOLERANCE_RE = re.compile(r'[±]?\s*(\d+(?:[.,]\d+)?)\s*%', re.IGNORECASE)
 
 _THROUGH_HOLE_PACKAGES = re.compile(
@@ -45,9 +52,9 @@ def _find_smd_package(text: str) -> str | None:
     alias = resolve_package_alias(text)
     if alias:
         return normalize_package(alias)
-    m = re.search(_SMD_PACKAGES, text)
-    if m:
-        return normalize_package(m.group(1))
+    code = find_smd_package(text)
+    if code:
+        return normalize_package(code)
     return None
 
 
@@ -97,7 +104,6 @@ def _extract_weerstanden(desc: str) -> Dict[str, str]:
         params['value'] = raw
 
     # Fallback: plain number as ohms (e.g. "150" in "Resistor 150 1% 50mW")
-    _SMD_CODES = {'0201', '0402', '0603', '0805', '1206', '1210', '1812', '2010', '2512'}
     if not params.get('value'):
         plain = re.search(
             r'\b(\d+(?:[.,]\d+)?)\b(?=\s+(?:\d|±|%|mW|W\b|V\b))',
@@ -438,6 +444,8 @@ def get_match_highlights(
 
     highlights: List[Dict] = []
     erp_upper = erp_description.upper()
+    # Configured prefix letters (longest first) that may be glued to a package code
+    package_prefixes = sorted(get_package_tags()['prefixes'], key=len, reverse=True)
 
     for param, value in query_params.items():
         if not value:
@@ -457,14 +465,16 @@ def get_match_highlights(
             start = idx
             end = idx + len(val_upper)
 
-            # Expand package highlights to include prefix like SMD, CER, RES
-            if param == 'package' and start >= 3:
-                prefix = erp_upper[start - 3:start]
-                if prefix in ('SMD', 'CER', 'RES', 'CAP'):
-                    start -= 3
-                    # Also expand end to include trailing letter (e.g. "N" in SMD0603N)
-                    while end < len(erp_upper) and erp_upper[end].isalpha():
-                        end += 1
+            # Expand package highlights to include a glued prefix (SMD, CER, RES, CASE, ...)
+            # and trailing letters (e.g. "N" in RES1206N), per the configured package tags
+            if param == 'package':
+                for prefix in package_prefixes:
+                    n = len(prefix)
+                    if start >= n and erp_upper[start - n:start] == prefix:
+                        start -= n
+                        break
+                while end < len(erp_upper) and erp_upper[end].isalpha():
+                    end += 1
 
             highlights.append({
                 'start': start,

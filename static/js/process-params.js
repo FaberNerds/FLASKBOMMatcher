@@ -17,6 +17,43 @@ async function loadPackageAliases() {
     }
 }
 
+// Known SMD package codes (imperial + metric). Shared by the package extractor
+// and by the value parsers that must not read e.g. "1608M" as megaohms.
+const PACKAGE_CODES = [
+    '01005', '0201', '0402', '0603', '0805', '1005', '1206', '1210',
+    '1608', '1812', '2010', '2012', '2220', '2512'
+];
+
+// Package prefix/suffix tags (loaded from settings; same defaults as Python backend)
+const DEFAULT_PACKAGE_PREFIXES = ['SMD', 'CASE', 'RES', 'CER', 'CAP'];
+const DEFAULT_PACKAGE_SUFFIXES = ['N', 'L'];
+let _packageTags = null;
+
+async function loadPackageTags() {
+    try {
+        const data = await apiCall('/api/settings/package-tags');
+        _packageTags = data.success
+            ? { prefixes: data.prefixes || [], suffixes: data.suffixes || [] }
+            : { prefixes: DEFAULT_PACKAGE_PREFIXES, suffixes: DEFAULT_PACKAGE_SUFFIXES };
+    } catch (e) {
+        _packageTags = { prefixes: DEFAULT_PACKAGE_PREFIXES, suffixes: DEFAULT_PACKAGE_SUFFIXES };
+    }
+}
+
+function escapeRegex(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Build an alternation group from a list, longest first so "CASE" wins over "C"
+function regexAlternation(list) {
+    return [...list]
+        .map(s => String(s).trim())
+        .filter(Boolean)
+        .sort((a, b) => b.length - a.length)
+        .map(escapeRegex)
+        .join('|');
+}
+
 // Default component detection tags
 const DEFAULT_RESISTOR_TAGS = ['RES', 'RESISTOR', 'OHM', 'Ω'];
 const DEFAULT_CAPACITOR_TAGS = [
@@ -162,7 +199,7 @@ function extractResistorValue(text) {
     if (trailingRMatches.length > 0) {
         return trailingRMatches[0][1].replace(',', '.') + trailingRMatches[0][2].toUpperCase();
     }
-    const packageCodes = ['0201', '0402', '0603', '0805', '1005', '1206', '1210', '1608', '1812', '2010', '2012', '2512'];
+    const packageCodes = PACKAGE_CODES;
     const resPattern = /\b(\d+(?:[.,]\d+)?)\s*([kKmM])(?!\s*ohm)\b/gi;
     const resMatches = [...text.matchAll(resPattern)];
     for (const match of resMatches) {
@@ -217,9 +254,17 @@ function extractPackageFromDescription(text) {
             }
         }
     }
-    const smdPattern = /(?:SMD|CASE)?(\b|(?<=[A-Za-z]))(0402|0603|0805|1206|1210|2512|0201|01005|2220)\b/gi;
+    // SMD packages with optional glued prefix/suffix letters from settings:
+    // 0402, SMD0603, CASE0805, RES1206N, CER0603N, RES1210L, ...
+    const tags = _packageTags || { prefixes: DEFAULT_PACKAGE_PREFIXES, suffixes: DEFAULT_PACKAGE_SUFFIXES };
+    const prefixAlt = regexAlternation(tags.prefixes);
+    const suffixAlt = regexAlternation(tags.suffixes);
+    const smdPattern = new RegExp(
+        `${prefixAlt ? `(?:${prefixAlt})?` : ''}(?:\\b|(?<=[A-Za-z]))(${regexAlternation(PACKAGE_CODES)})${suffixAlt ? `(?:${suffixAlt})?` : ''}\\b`,
+        'gi'
+    );
     const smdMatches = [...text.matchAll(smdPattern)];
-    if (smdMatches.length > 0) return smdMatches[0][2];
+    if (smdMatches.length > 0) return smdMatches[0][1];
     const pkgPattern = /\b(SOT[-]?\d+|QFP[-]?\d+|SOIC[-]?\d+|DIP[-]?\d+|BGA[-]?\d+|TSSOP[-]?\d+)/gi;
     const pkgMatches = [...text.matchAll(pkgPattern)];
     if (pkgMatches.length > 0) return pkgMatches[0][1];
@@ -376,7 +421,7 @@ function normalizeValue(value) {
     if (decimalKMatch) return (parseFloat(decimalKMatch[1]) * 1000).toString();
 
     // Megaohm
-    const packageCodes = ['0201', '0402', '0603', '0805', '1005', '1206', '1210', '1608', '1812', '2010', '2012', '2512'];
+    const packageCodes = PACKAGE_CODES;
     const mMatch = val.match(/^(\d+)m(\d*)$/i);
     if (mMatch && !val.includes('f')) {
         if (!packageCodes.includes(mMatch[1])) {
@@ -441,8 +486,9 @@ async function populateMatcherParamsTable() {
     const tbody = document.getElementById('paramsTableBody');
     if (!tbody || !bomData) return;
 
-    // Ensure aliases are loaded before extraction
+    // Ensure aliases and package tags are loaded before extraction
     if (_packageAliases === null) await loadPackageAliases();
+    if (_packageTags === null) await loadPackageTags();
 
     tbody.innerHTML = '';
     const mapping = bomData.column_mapping || {};
