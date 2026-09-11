@@ -18,9 +18,11 @@ from typing import Dict, List, Optional, Tuple
 
 from services.db_service import get_connection_context
 from services.package_alias_service import resolve_package_alias
-from services.package_tags_service import find_smd_package
+from services.package_tags_service import PACKAGE_CODES, find_smd_package
 
 logger = logging.getLogger(__name__)
+
+_PACKAGE_CODE_SET = set(PACKAGE_CODES)
 
 # ---------------------------------------------------------------------------
 # SQLite database path
@@ -68,6 +70,16 @@ SUBSTITUTABLE_PARAMS = {
 # Core value (capacitance/value/inductance): wrong value is never acceptable.
 DISQUALIFYING_PARAMS = {"package", "capacitance", "value", "inductance", "case_size"}
 
+# The one parameter a query MUST contain before parametric scoring is meaningful.
+# Without it, voltage + package alone would still score 100% and auto-select a
+# random part of the right footprint. A query lacking its core param scores 0.
+CORE_PARAMS = {
+    "WEERSTANDEN": "value",
+    "CONDENSATOREN": "capacitance",
+    "SPOELEN EN SUPPRESSORS": "inductance",
+    "ELCO'S EN TANTALEN": "capacitance",
+}
+
 
 # ===========================================================================
 # Value normalizers
@@ -76,6 +88,17 @@ DISQUALIFYING_PARAMS = {"package", "capacitance", "value", "inductance", "case_s
 def _european_decimal(s: str) -> str:
     """Replace European comma decimal separator with a dot."""
     return s.replace(",", ".")
+
+
+# Micro sign (U+00B5), Greek small mu (U+03BC) and Greek capital mu (U+039C).
+# str.upper() turns the micro sign into Greek capital mu, so all three must
+# be folded to ASCII 'u' before any unit regex runs.
+_MU_RE = re.compile('[\u00b5\u03bc\u039c]')
+
+
+def normalize_micro(text: str) -> str:
+    """Fold every micro/mu variant in *text* to ASCII 'u'."""
+    return _MU_RE.sub('u', text) if text else text
 
 
 def normalize_resistance(value_str: str) -> Optional[float]:
@@ -168,9 +191,9 @@ def normalize_capacitance(value_str: str) -> Optional[float]:
     """
     if not value_str:
         return None
-    s = _european_decimal(value_str.strip())
+    s = _european_decimal(normalize_micro(value_str).strip())
 
-    m = re.match(r'^(\d+(?:\.\d+)?)\s*([fpnuµmPNUM]?)[Ff]?$', s)
+    m = re.match(r'^(\d+(?:\.\d+)?)\s*([fpnumPNUM]?)[Ff]?$', s)
     if not m:
         return None
 
@@ -190,9 +213,9 @@ def normalize_inductance(value_str: str) -> Optional[float]:
     """
     if not value_str:
         return None
-    s = _european_decimal(value_str.strip())
+    s = _european_decimal(normalize_micro(value_str).strip())
 
-    m = re.match(r'^(\d+(?:\.\d+)?)\s*([nuµmNUM]?)[Hh]?$', s)
+    m = re.match(r'^(\d+(?:\.\d+)?)\s*([numNUM]?)[Hh]?$', s)
     if not m:
         return None
 
@@ -203,6 +226,85 @@ def normalize_inductance(value_str: str) -> Optional[float]:
                    'u': 1e-6, 'U': 1e-6, 'µ': 1e-6,
                    'm': 1e-3, 'M': 1e-3, '': 1.0}
     return val * multipliers.get(prefix, 1.0)
+
+
+# ---------------------------------------------------------------------------
+# Shared value finders
+#
+# Used by BOTH the ERP index parsers below and the customer-BOM extractors in
+# param_extract_service, so the two sides can never disagree on a notation.
+# ---------------------------------------------------------------------------
+
+# Tier 1: explicit unit with F  -> 100nF, 4,7uF, 1µF, 500fF, 22mF, 10 pF, MKP13uF, 10nFx4
+_CAP_UNIT_RE = re.compile(r'(\d+(?:[.,]\d+)?)\s*([fpnum])F(?![A-WYZa-wyz])', re.IGNORECASE)
+# Tier 2: multiplier as decimal point  -> 6p8, 2u2, 3N3, 0P47
+_CAP_MID_RE = re.compile(r'\b(\d+)([pnu])(\d+)\b', re.IGNORECASE)
+# Tier 3: bare multiplier  -> 68p, 220n, 1u, 100N, 0,5P
+_CAP_BARE_RE = re.compile(r'\b(\d+(?:[.,]\d+)?)([pnu])\b', re.IGNORECASE)
+# Tier 4: plain Farads (supercaps)  -> 1F, 0,22F
+_CAP_PLAIN_RE = re.compile(r'\b(\d+(?:[.,]\d+)?)\s?F\b', re.IGNORECASE)
+
+
+def find_capacitance(text: str) -> Optional[str]:
+    """Find a capacitance in free text and return it canonically, e.g. '4.7nF'.
+
+    Accepts explicit units (4,7nF / 1µF), European shorthand with the
+    multiplier as decimal point (6p8 / 2u2 / 3N3) and bare multipliers
+    (68p / 220n / 1u). Package codes such as 0603 are never read as a value.
+    Returns None when nothing plausible is found.
+    """
+    if not text:
+        return None
+    t = normalize_micro(text)
+
+    m = _CAP_UNIT_RE.search(t)
+    if m:
+        return _european_decimal(m.group(1)) + m.group(2).lower() + "F"
+
+    m = _CAP_MID_RE.search(t)
+    if m and m.group(1) + m.group(3) not in _PACKAGE_CODE_SET:
+        return f"{m.group(1)}.{m.group(3)}{m.group(2).lower()}F"
+
+    for m in _CAP_BARE_RE.finditer(t):
+        if m.group(1) in _PACKAGE_CODE_SET:
+            continue  # e.g. a footprint written as 0603N
+        return _european_decimal(m.group(1)) + m.group(2).lower() + "F"
+
+    m = _CAP_PLAIN_RE.search(t)
+    if m:
+        return _european_decimal(m.group(1)) + "F"
+
+    return None
+
+
+# 6V3 -> 6.3V (digit V digit, both sides bounded)
+_VOLT_MID_RE = re.compile(r'\b(\d+)V(\d+)\b', re.IGNORECASE)
+# 16V, 6.3V, 6,3V, 50VDC, 275VAC, 2kV, 1,5 kV. A letter/digit right before the
+# number is rejected so MPN fragments like ATMEGA162V or Y5V never read as volts.
+_VOLT_RE = re.compile(r'(?<![A-Za-z0-9])(\d+(?:[.,]\d+)?)\s*(k?)V(?:DC|AC)?\b', re.IGNORECASE)
+
+
+def find_voltage(text: str) -> Optional[str]:
+    """Find a voltage rating in free text and return it as '<number>V'.
+
+    Handles 16V, 6.3V, 6,3V, 6V3, 50VDC, 275VAC and kilovolts (2kV -> 2000V).
+    """
+    if not text:
+        return None
+
+    m = _VOLT_MID_RE.search(text)
+    if m:
+        return f"{m.group(1)}.{m.group(2)}V"
+
+    m = _VOLT_RE.search(text)
+    if m:
+        num = _european_decimal(m.group(1))
+        if m.group(2):
+            val = float(num) * 1000
+            num = str(int(val)) if val.is_integer() else str(val)
+        return num + "V"
+
+    return None
 
 
 def normalize_package(pkg_str: str) -> str:
@@ -245,11 +347,8 @@ def _parse_tolerance(desc: str) -> Optional[str]:
 
 
 def _parse_voltage(desc: str) -> Optional[str]:
-    """Extract voltage value like 50V, 16V, 100V."""
-    m = re.search(r'(\d+(?:[.,]\d+)?)\s*[Vv](?:\b|$)', desc)
-    if m:
-        return _european_decimal(m.group(1)) + "V"
-    return None
+    """Extract voltage value like 50V, 16V, 6V3, 2kV (see find_voltage)."""
+    return find_voltage(desc)
 
 
 def _parse_package_from_desc(desc: str) -> Optional[str]:
@@ -336,26 +435,10 @@ def parse_condensatoren(desc: str) -> Dict[str, str]:
             val = "NP0"
         params["dielectric"] = val
 
-    # Capacitance: 100nF, 10uF, 4,7pF, 1µF (with F suffix)
-    m = re.search(r'(\d+(?:[.,]\d+)?)\s*([fpnuµFPNUµ])[Ff]', d)
-    if m:
-        params["capacitance"] = _european_decimal(m.group(1)) + m.group(2).lower() + "F"
-    else:
-        # ERP shorthand without F: 100N=100nF, 3N3=3.3nF, 6N8=6.8nF, 1U=1µF, 100P=100pF
-        # Pattern: digits + multiplier-as-decimal + digits (e.g. 3N3, 6P8, 2U2)
-        m = re.search(r'\b(\d+)([NnPpUu])(\d+)\b', d)
-        if m:
-            val = f"{m.group(1)}.{m.group(3)}"
-            prefix = m.group(2).lower()
-            prefix_map = {'n': 'n', 'p': 'p', 'u': 'u'}
-            params["capacitance"] = val + prefix_map.get(prefix, prefix) + "F"
-        else:
-            # Plain: 100N, 1U, 470P (digits + single multiplier, no trailing digits)
-            m = re.search(r'\b(\d+(?:[.,]\d+)?)([NnPpUu])\b', d)
-            if m:
-                prefix = m.group(2).lower()
-                prefix_map = {'n': 'n', 'p': 'p', 'u': 'u'}
-                params["capacitance"] = _european_decimal(m.group(1)) + prefix_map.get(prefix, prefix) + "F"
+    # Capacitance: 100nF, 10uF, 4,7pF, 1µF, and shorthand 3N3 / 6P8 / 100N / 1U
+    cap = find_capacitance(d)
+    if cap:
+        params["capacitance"] = cap
 
     # Tolerance
     tol = _parse_tolerance(d)
@@ -542,10 +625,10 @@ def parse_elcos(desc: str) -> Dict[str, str]:
         val = m.group(1).upper()
         params["cap_type"] = "TANT" if val.startswith("TANT") else val
 
-    # Capacitance
-    m = re.search(r'(\d+(?:[.,]\d+)?)\s*([puµPUµ])[Ff]', d)
-    if m:
-        params["capacitance"] = _european_decimal(m.group(1)) + m.group(2).lower() + "F"
+    # Capacitance: 47uF, 68µF, 3U3, 220u, 1F (supercap)
+    cap = find_capacitance(d)
+    if cap:
+        params["capacitance"] = cap
 
     # Voltage
     volt = _parse_voltage(d)
@@ -870,6 +953,10 @@ class CategoryIndex:
         Returns:
             List of result dicts sorted by descending score.
         """
+        # The index stores canonical upper-case categories; the BOM category
+        # detector returns mixed case (e.g. "ELCO'S en TANTALEN").
+        category = (category or "").strip().upper()
+
         conn = self._get_conn()
         try:
             # Fetch all components in the category
@@ -956,6 +1043,12 @@ class CategoryIndex:
         Returns (score, matched_params) where matched_params maps
         param_name → (query_value, candidate_value).
         """
+        # A query without its core value (capacitance / resistance / inductance)
+        # cannot be scored meaningfully: package + voltage alone would give 100%.
+        core = CORE_PARAMS.get((category or "").upper())
+        if core and not query_params.get(core):
+            return 0.0, {}
+
         total_weight = sum(weights.get(p, 0) for p in query_params)
         if total_weight == 0:
             return 0.0, {}

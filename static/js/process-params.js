@@ -87,6 +87,12 @@ function extractVoltageFromDescription(text) {
     if (euroMatches.length > 0) {
         return euroMatches[0][1] + '.' + euroMatches[0][2] + 'V';
     }
+    // Kilovolts: 2kV, 1,5 kV -> 2000V, 1500V (same as the Python find_voltage)
+    const kvPattern = /(?:^|[\s,;])(\d+(?:[.,]\d+)?)\s*kV(?![A-Za-z0-9])/gi;
+    const kvMatches = [...text.matchAll(kvPattern)];
+    if (kvMatches.length > 0) {
+        return String(parseFloat(kvMatches[0][1].replace(',', '.')) * 1000) + 'V';
+    }
     const voltagePattern = /(?:^|[\s,;])(\d+(?:[.,]\d+)?)\s*V(?:DC|AC)?(?![A-Za-z0-9])/gi;
     const matches = [...text.matchAll(voltagePattern)];
     if (matches.length === 0) return null;

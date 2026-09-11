@@ -11,6 +11,9 @@ import logging
 from typing import Dict, List
 
 from services.category_index_service import (
+    find_capacitance,
+    find_voltage,
+    normalize_micro,
     normalize_resistance,
     normalize_capacitance,
     normalize_inductance,
@@ -67,11 +70,8 @@ def _find_ic_package(text: str) -> str | None:
 
 
 def _find_voltage(text: str) -> str | None:
-    m = re.search(r'(\d+(?:[.,]\d+)?)\s*V\b', text, re.IGNORECASE)
-    if m:
-        val = m.group(1).replace(',', '.')
-        return f"{val}V"
-    return None
+    # Shared with the ERP index parser: 16V, 6.3V, 6V3, 50VDC, 2kV, ...
+    return find_voltage(text)
 
 
 # ---------------------------------------------------------------------------
@@ -143,16 +143,11 @@ def _extract_condensatoren(desc: str) -> Dict[str, str]:
     """Extract capacitor parameters."""
     params: Dict[str, str] = {}
 
-    # Capacitance: 100nF, 10uF, 4.7pF, 1µF, 4,7nF, 500fF
-    cap = re.search(
-        r'\b(\d+(?:[.,]\d+)?)\s*([fpnuµm]?F)\b', desc, re.IGNORECASE)
+    # Capacitance: 100nF, 10uF, 4.7pF, 1µF, 4,7nF, 500fF and the shorthand
+    # forms 6p8 / 2u2 / 68p / 220n / 1u. Shared with the ERP index parser.
+    cap = find_capacitance(desc)
     if cap:
-        val = cap.group(1).replace(',', '.')
-        unit = cap.group(2).replace('µ', 'u')
-        # Restore canonical casing: FF→fF, NF→nF, PF→pF, UF→uF, MF→mF
-        if len(unit) == 2 and unit[1] == 'F':
-            unit = unit[0].lower() + 'F'
-        params['capacitance'] = f"{val}{unit}"
+        params['capacitance'] = cap
 
     # Voltage
     v = _find_voltage(desc)
@@ -334,14 +329,10 @@ def _extract_elcos(desc: str) -> Dict[str, str]:
     """Extract electrolytic / tantalum capacitor parameters."""
     params: Dict[str, str] = {}
 
-    # Capacitance
-    cap = re.search(r'\b(\d+(?:[.,]\d+)?)\s*([nuµm]?F)\b', desc, re.IGNORECASE)
+    # Capacitance: 47uF, 68µF, 3U3, 220u, 1F (supercap). Shared with the ERP parser.
+    cap = find_capacitance(desc)
     if cap:
-        val = cap.group(1).replace(',', '.')
-        unit = cap.group(2).replace('µ', 'u')
-        if len(unit) == 2 and unit[1] == 'F':
-            unit = unit[0].lower() + 'F'
-        params['capacitance'] = f"{val}{unit}"
+        params['capacitance'] = cap
 
     # Voltage
     v = _find_voltage(desc)
@@ -401,7 +392,9 @@ def extract_parameters(description: str, category: str) -> Dict[str, str]:
     if not description or not category:
         return {}
 
-    desc_upper = description.upper().strip()
+    # Fold µ/μ to 'u' BEFORE uppercasing: str.upper() would otherwise turn the
+    # micro sign into Greek capital mu, which no unit regex recognises.
+    desc_upper = normalize_micro(description).upper().strip()
     cat_upper = category.upper().strip()
 
     extractor = _CATEGORY_MAP.get(cat_upper)

@@ -28,3 +28,6 @@ Flask-Limiter>=3.5.0  # Rate limiting
 # Windows Service & Production Server
 pywin32>=306          # Windows service framework
 cheroot>=10.0.0       # Production WSGI server with SSL support
+
+# Tests (run with: python -m pytest)
+pytest>=8.0.0
