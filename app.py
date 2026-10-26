@@ -125,7 +125,9 @@ if LIMITER_AVAILABLE:
     limiter = Limiter(
         key_func=get_remote_address,
         app=app,
-        default_limits=["200 per day", "100 per hour"],
+        # Internal tool: the default only guards against runaway loops/scripts.
+        # Heavy endpoints get their own limits below.
+        default_limits=["300 per minute"],
         storage_uri="memory://",
     )
 else:
@@ -165,8 +167,10 @@ register_blueprints(app)
 # Apply rate limits
 if limiter:
     limiter.limit("10 per minute")(app.view_functions.get('upload.upload_file', lambda: None))
-    limiter.limit("5 per minute")(app.view_functions.get('match.find_ipn', lambda: None))
-    limiter.limit("5 per minute")(app.view_functions.get('match.assess_mpnfree', lambda: None))
+    limiter.limit("10 per minute")(app.view_functions.get('match.find_ipn', lambda: None))
+    limiter.limit("10 per minute")(app.view_functions.get('match.assess_mpnfree', lambda: None))
+    limiter.limit("2 per minute")(app.view_functions.get('settings.rebuild_index', lambda: None))
+    limiter.limit("20 per minute")(app.view_functions.get('exact.fetch_previous', lambda: None))
 
 
 @app.after_request
