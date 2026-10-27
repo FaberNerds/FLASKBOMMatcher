@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>{{ log_filename }} - Live log</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Design System CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            background: #0f172a;
+        }
+
+        .topbar {
+            background: linear-gradient(90deg, var(--bg-header-gradient-start), var(--bg-header-gradient-end));
+            color: #f9fafb;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .topbar-title {
+            font-size: 18px;
+            font-weight: 600;
+            font-family: Consolas, 'Cascadia Mono', monospace;
+        }
+
+        .topbar-meta {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            font-size: var(--font-size-sm);
+            color: #cbd5e1;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #94a3b8;
+        }
+
+        .status[data-state="live"] .status-dot { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .status[data-state="paused"] .status-dot { background: #94a3b8; }
+        .status[data-state="missing"] .status-dot { background: #f59e0b; }
+        .status[data-state="error"] .status-dot { background: #ef4444; }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 20px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            flex-wrap: wrap;
+        }
+
+        .toolbar .spacer {
+            flex: 1;
+        }
+
+        .tb-btn {
+            background: transparent;
+            border: 1px solid #475569;
+            color: #e2e8f0;
+            padding: 5px 12px;
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        .tb-btn:hover {
+            border-color: #94a3b8;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .tb-btn.active {
+            background: var(--color-primary);
+            border-color: var(--color-primary);
+            color: white;
+        }
+
+        .filter-input {
+            background: #0f172a;
+            border: 1px solid #475569;
+            color: #e2e8f0;
+            padding: 5px 10px;
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            width: 260px;
+        }
+
+        .filter-input:focus {
+            outline: none;
+            border-color: var(--color-primary);
+        }
+
+        .line-count {
+            color: #94a3b8;
+            font-size: var(--font-size-sm);
+        }
+
+        #log {
+            flex: 1;
+            overflow: auto;
+            padding: 8px 20px 16px;
+            font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace;
+            font-size: 12.5px;
+            line-height: 1.5;
+            color: #cbd5e1;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        #log .ln.warn { color: #fbbf24; }
+        #log .ln.err { color: #f87171; }
+        #log .ln.hidden { display: none; }
+
+        .notice {
+            color: #94a3b8;
+            font-style: italic;
+            padding: 12px 0;
+        }
+
+        @media (max-width: 768px) {
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .filter-input {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="topbar">
+        <span class="topbar-title">{{ log_filename }}</span>
+        <div class="topbar-meta">
+            <span id="size"></span>
+            <span class="status" id="status" data-state="live"><span class="status-dot"></span><span id="statusText">Connecting&hellip;</span></span>
+        </div>
+    </div>
+
+    <div class="toolbar">
+        <button id="btnPause" class="tb-btn" type="button">Pause</button>
+        <button id="btnFollow" class="tb-btn active" type="button" title="Keep scrolled to the newest line">Follow</button>
+        <button id="btnClear" class="tb-btn" type="button" title="Clear the window (the file is not touched)">Clear view</button>
+        <input id="filter" class="filter-input" type="search" placeholder="Filter lines&hellip;" autocomplete="off">
+        <span class="spacer"></span>
+        <span class="line-count" id="lineCount"></span>
+    </div>
+
+    <div id="log"></div>
+
+    <script>
+        const LOG_NAME = {{ log_name | tojson }};
+        const LOG_FILENAME = {{ log_filename | tojson }};
+        const POLL_MS = 1500;
+        const MAX_LINES = 5000;
+        // A new log record starts with "HH:MM:SS" (or "YYYY-MM-DD" in lines from older versions);
+        // other lines (tracebacks) continue the previous record
+        const RECORD_START = /^(\d{2}:\d{2}:\d{2}|\d{4}-\d{2}-\d{2}) /;
+
+        const logEl = document.getElementById('log');
+        const statusEl = document.getElementById('status');
+        const statusText = document.getElementById('statusText');
+        const sizeEl = document.getElementById('size');
+        const lineCountEl = document.getElementById('lineCount');
+        const btnPause = document.getElementById('btnPause');
+        const btnFollow = document.getElementById('btnFollow');
+        const filterInput = document.getElementById('filter');
+
+        let offset = -1;          // -1 = load the tail of the file
+        let paused = false;
+        let follow = true;
+        let lastClass = '';       // Level class of the current record, inherited by continuation lines
+        let pollTimer = null;
+        let inFlight = false;
+
+        function setStatus(state, text) {
+            statusEl.dataset.state = state;
+            statusText.textContent = text;
+        }
+
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+        }
+
+        function classify(line) {
+            if (!RECORD_START.test(line)) return lastClass;
+            // Record format: "15:41:56  WARNING  match_api     message"
+            // (older versions: "2026-10-27 15:41:56,000 - name - LEVEL - message")
+            if (/^\S+  (ERROR|CRITICAL) |^\S+ \S+ - \S+ - (ERROR|CRITICAL) - /.test(line)) lastClass = 'err';
+            else if (/^\S+  WARNING |^\S+ \S+ - \S+ - WARNING - /.test(line)) lastClass = 'warn';
+            else lastClass = '';
+            return lastClass;
+        }
+
+        function classifyRaw(line) {
+            // stdout/stderr have no record format: tint by keyword only
+            if (/Traceback|Error|Exception|CRITICAL/.test(line)) return 'err';
+            if (/WARNING|Warning/.test(line)) return 'warn';
+            return '';
+        }
+
+        function matchesFilter(line) {
+            const f = filterInput.value.trim().toLowerCase();
+            return !f || line.toLowerCase().includes(f);
+        }
+
+        function updateLineCount() {
+            const total = logEl.querySelectorAll('.ln').length;
+            const hidden = logEl.querySelectorAll('.ln.hidden').length;
+            lineCountEl.textContent = hidden ? `${total - hidden} of ${total} lines` : `${total} lines`;
+        }
+
+        function scrollToBottom() {
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function appendText(text) {
+            const lines = text.split('\n');
+            if (lines[lines.length - 1] === '') lines.pop();
+            if (!lines.length) return;
+
+            logEl.querySelector('.notice')?.remove();
+            const frag = document.createDocumentFragment();
+            for (const line of lines) {
+                const div = document.createElement('div');
+                const cls = LOG_NAME === 'server' ? classify(line) : classifyRaw(line);
+                div.className = 'ln' + (cls ? ' ' + cls : '') + (matchesFilter(line) ? '' : ' hidden');
+                div.textContent = line;
+                frag.appendChild(div);
+            }
+            logEl.appendChild(frag);
+
+            let excess = logEl.querySelectorAll('.ln').length - MAX_LINES;
+            while (excess-- > 0) logEl.firstElementChild.remove();
+
+            updateLineCount();
+            if (follow) scrollToBottom();
+        }
+
+        function showNotice(text) {
+            if (logEl.querySelector('.ln')) return;
+            logEl.innerHTML = '';
+            const div = document.createElement('div');
+            div.className = 'notice';
+            div.textContent = text;
+            logEl.appendChild(div);
+        }
+
+        function clearView() {
+            logEl.innerHTML = '';
+            lastClass = '';
+            updateLineCount();
+        }
+
+        async function poll() {
+            pollTimer = null;
+            if (inFlight) return;  // The running poll reschedules itself
+            inFlight = true;
+            try {
+                const resp = await fetch(`/api/logs/${LOG_NAME}/tail?offset=${offset}`, { cache: 'no-store' });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) throw new Error(data.error || resp.statusText);
+
+                if (data.reset) clearView();
+                if (!data.exists) {
+                    offset = -1;
+                    sizeEl.textContent = '';
+                    setStatus('missing', 'File not found');
+                    showNotice(`${LOG_FILENAME} does not exist (yet). It is only written when the app runs as a Windows service. Waiting…`);
+                } else {
+                    offset = data.offset;
+                    sizeEl.textContent = formatSize(data.size);
+                    if (!paused) setStatus('live', 'Live');
+                    appendText(data.text);
+                    if (!logEl.querySelector('.ln')) showNotice('The log is empty. Waiting for new lines…');
+                }
+            } catch (err) {
+                setStatus('error', 'Connection lost — retrying');
+            }
+            inFlight = false;
+            schedule();
+        }
+
+        function schedule() {
+            if (!paused && !pollTimer) pollTimer = setTimeout(poll, POLL_MS);
+        }
+
+        btnPause.addEventListener('click', () => {
+            paused = !paused;
+            btnPause.textContent = paused ? 'Resume' : 'Pause';
+            btnPause.classList.toggle('active', paused);
+            if (paused) {
+                clearTimeout(pollTimer);
+                pollTimer = null;
+                setStatus('paused', 'Paused');
+            } else {
+                poll();  // Continues from the last offset, so nothing is missed
+            }
+        });
+
+        function setFollow(on) {
+            follow = on;
+            btnFollow.classList.toggle('active', on);
+            if (on) scrollToBottom();
+        }
+
+        btnFollow.addEventListener('click', () => setFollow(!follow));
+
+        // Scrolling up stops following; scrolling back to the bottom resumes it
+        logEl.addEventListener('scroll', () => {
+            const atBottom = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 20;
+            if (atBottom !== follow) setFollow(atBottom);
+        });
+
+        document.getElementById('btnClear').addEventListener('click', clearView);
+
+        filterInput.addEventListener('input', () => {
+            logEl.querySelectorAll('.ln').forEach(div => {
+                div.classList.toggle('hidden', !matchesFilter(div.textContent));
+            });
+            updateLineCount();
+            if (follow) scrollToBottom();
+        });
+
+        poll();
+    </script>
+</body>
+
+</html>

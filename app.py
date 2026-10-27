@@ -10,6 +10,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from flask import Flask, jsonify, request
 from routes import register_blueprints
+from services import vulnerability_audit_service
 import config
 
 # ---- Service Imports (pywin32) ----
@@ -56,27 +57,30 @@ class _ShortNameFormatter(logging.Formatter):
         record.shortname = parts[-1].replace('_service', '').replace('_api', '_api')
         return super().format(record)
 
-log_format = '%(asctime)s  %(shortname)-12s  %(message)s'
+# The level column lets the Settings -> Logging viewer tint warnings and errors
+log_format = '%(asctime)s  %(levelname)-7s  %(shortname)-12s  %(message)s'
 log_datefmt = '%H:%M:%S'
 root_logger = logging.getLogger()
 root_logger.setLevel(logging.INFO)
 root_logger.handlers.clear()
 
-# Always log to stdout.
+# Log to stdout when there is one (under the Windows service sys.stdout is None
+# at import; a StreamHandler on it would write a "--- Logging error ---"
+# traceback to service_stderr.log for every record).
 # On Windows stdout defaults to the console code page (cp1252), which cannot
 # encode characters such as "→" used in log lines; logging would then drop the
 # line and print a "Logging error" traceback. Force UTF-8 and never raise.
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-stream_handler = logging.StreamHandler(sys.stdout)
-stream_handler.setLevel(logging.DEBUG if config.DEBUG_MODE else logging.INFO)
-stream_handler.setFormatter(_ShortNameFormatter(log_format, datefmt=log_datefmt))
-root_logger.addHandler(stream_handler)
+if sys.stdout is not None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.setLevel(logging.DEBUG if config.DEBUG_MODE else logging.INFO)
+    stream_handler.setFormatter(_ShortNameFormatter(log_format, datefmt=log_datefmt))
+    root_logger.addHandler(stream_handler)
 
 if not config.DEBUG_MODE:
     # Production: also log to file
-    _log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'server.log')
-    file_handler = RotatingFileHandler(_log_path, maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
+    file_handler = RotatingFileHandler(config.LOG_FILE, maxBytes=10*1024*1024, backupCount=5, encoding="utf-8")
     file_handler.setFormatter(_ShortNameFormatter(log_format, datefmt=log_datefmt))
     file_handler.setLevel(logging.INFO)
     root_logger.addHandler(file_handler)
@@ -171,6 +175,10 @@ if limiter:
     limiter.limit("10 per minute")(app.view_functions.get('match.assess_mpnfree', lambda: None))
     limiter.limit("2 per minute")(app.view_functions.get('settings.rebuild_index', lambda: None))
     limiter.limit("20 per minute")(app.view_functions.get('exact.fetch_previous', lambda: None))
+    # The log viewer polls every 1.5 s per open window; keep it out of the default limit
+    limiter.exempt(app.view_functions['logs.log_tail'])
+    limiter.exempt(app.view_functions['logs.security_audit_reports'])
+    limiter.exempt(app.view_functions['logs.security_audit_report'])
 
 
 @app.after_request
@@ -263,9 +271,9 @@ if win32serviceutil is not None:
 
             # Redirect stdout/stderr for headless service operation
             if sys.stdout is None:
-                sys.stdout = open(os.path.join(basedir, 'service_stdout.log'), 'a', encoding='utf-8')
+                sys.stdout = open(config.SERVICE_STDOUT_LOG, 'a', encoding='utf-8')
             if sys.stderr is None:
-                sys.stderr = open(os.path.join(basedir, 'service_stderr.log'), 'a', encoding='utf-8')
+                sys.stderr = open(config.SERVICE_STDERR_LOG, 'a', encoding='utf-8')
 
             try:
                 self.main()
@@ -296,6 +304,9 @@ if win32serviceutil is not None:
             else:
                 svc_logger.warning("SSL certificates not found - running without HTTPS")
 
+            # Not started at import: tests import the app and must not call the OSV API
+            vulnerability_audit_service.start_scheduler()
+
             svc_logger.info("Cheroot server starting...")
             self.server.start()  # Blocks until server.stop() is called
             svc_logger.info("Server has stopped")
@@ -322,6 +333,9 @@ if __name__ == '__main__':
                 "SSL certificate not found. Starting without HTTPS. "
                 "Run 'python ssl/generate_cert.py' to generate a self-signed certificate."
             )
+
+        # The reloader is off (use_reloader=False), so this runs in a single process
+        vulnerability_audit_service.start_scheduler()
 
         port = int(os.environ.get('FLASK_PORT', config.FLASK_PORT))
         app.run(debug=debug_mode, host='0.0.0.0', port=port, use_reloader=False, ssl_context=ssl_context)

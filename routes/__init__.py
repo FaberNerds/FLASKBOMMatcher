@@ -14,6 +14,7 @@ def register_blueprints(app: Flask) -> None:
     from routes.export_api import export_bp
     from routes.history_api import history_bp
     from routes.exact_api import exact_bp
+    from routes.logging_api import logs_bp
 
     app.register_blueprint(pages_bp)
     app.register_blueprint(upload_bp, url_prefix='/api')
@@ -22,3 +23,4 @@ def register_blueprints(app: Flask) -> None:
     app.register_blueprint(export_bp, url_prefix='/api')
     app.register_blueprint(history_bp, url_prefix='/api')
     app.register_blueprint(exact_bp, url_prefix='/api')
+    app.register_blueprint(logs_bp, url_prefix='/api')

@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <title>Security audit - BOM Matcher</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Design System CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            background: #0f172a;
+            color: #cbd5e1;
+        }
+
+        .topbar {
+            background: linear-gradient(90deg, var(--bg-header-gradient-start), var(--bg-header-gradient-end));
+            color: #f9fafb;
+            padding: 12px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            box-shadow: var(--shadow-lg);
+        }
+
+        .topbar-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: var(--font-size-sm);
+            color: #cbd5e1;
+        }
+
+        .status-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            background: #94a3b8;
+        }
+
+        .status[data-state="ok"] .status-dot { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+        .status[data-state="vulnerable"] .status-dot { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+        .status[data-state="error"] .status-dot { background: #f59e0b; }
+        .status[data-state="running"] .status-dot { background: #38bdf8; box-shadow: 0 0 6px #38bdf8; }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px 20px;
+            background: #1e293b;
+            border-bottom: 1px solid #334155;
+            flex-wrap: wrap;
+            font-size: var(--font-size-sm);
+        }
+
+        .toolbar .spacer {
+            flex: 1;
+        }
+
+        .toolbar .hint {
+            color: #94a3b8;
+        }
+
+        .tb-btn {
+            background: transparent;
+            border: 1px solid #475569;
+            color: #e2e8f0;
+            padding: 5px 12px;
+            border-radius: var(--radius-md);
+            font-size: var(--font-size-sm);
+            font-family: inherit;
+            cursor: pointer;
+        }
+
+        .tb-btn:hover:not(:disabled) {
+            border-color: #94a3b8;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .tb-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .layout {
+            flex: 1;
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            min-height: 0;
+        }
+
+        /* History list */
+        #history {
+            overflow: auto;
+            border-right: 1px solid #334155;
+            background: #111827;
+        }
+
+        .hist-item {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid #1f2937;
+            color: inherit;
+            font-family: inherit;
+            padding: 10px 16px;
+            cursor: pointer;
+        }
+
+        .hist-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+        }
+
+        .hist-item.active {
+            background: #1e293b;
+            box-shadow: inset 3px 0 0 var(--color-primary);
+        }
+
+        .hist-date {
+            color: #f1f5f9;
+            font-weight: 500;
+            font-size: var(--font-size-sm);
+        }
+
+        .hist-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 4px;
+            font-size: var(--font-size-xs);
+            color: #94a3b8;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 1px 8px;
+            border-radius: 999px;
+            font-size: var(--font-size-xs);
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        .badge.ok { background: rgba(34, 197, 94, 0.15); color: #4ade80; }
+        .badge.vuln { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+        .badge.error { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+
+        /* Report detail */
+        #detail {
+            overflow: auto;
+            padding: 20px 24px 32px;
+        }
+
+        .notice {
+            color: #94a3b8;
+            font-style: italic;
+            padding: 12px 0;
+        }
+
+        .report-title {
+            font-size: 20px;
+            font-weight: 600;
+            color: #f9fafb;
+            margin: 0 0 12px;
+        }
+
+        .facts {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 8px 24px;
+            margin-bottom: 20px;
+            font-size: var(--font-size-sm);
+        }
+
+        .fact-label {
+            color: #94a3b8;
+            font-size: var(--font-size-xs);
+        }
+
+        .fact-value {
+            color: #e2e8f0;
+            word-break: break-all;
+        }
+
+        .result-box {
+            border-radius: var(--radius-md);
+            padding: 12px 16px;
+            margin-bottom: 20px;
+            font-size: var(--font-size-sm);
+        }
+
+        .result-box.ok { background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.4); color: #bbf7d0; }
+        .result-box.vuln { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.4); color: #fecaca; }
+        .result-box.error { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.4); color: #fde68a; }
+
+        table.findings {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: var(--font-size-sm);
+            margin-bottom: 24px;
+        }
+
+        .findings th {
+            text-align: left;
+            color: #94a3b8;
+            font-weight: 500;
+            font-size: var(--font-size-xs);
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 6px 10px;
+            border-bottom: 1px solid #334155;
+        }
+
+        .findings td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #1f2937;
+            vertical-align: top;
+        }
+
+        .findings a {
+            color: #7dd3fc;
+        }
+
+        .mono {
+            font-family: Consolas, 'Cascadia Mono', monospace;
+            font-size: 12.5px;
+        }
+
+        .sev {
+            display: inline-block;
+            padding: 1px 6px;
+            border-radius: var(--radius-sm, 4px);
+            font-size: var(--font-size-xs);
+            font-weight: 600;
+        }
+
+        .sev.high { background: #7f1d1d; color: #fecaca; }
+        .sev.med { background: #78350f; color: #fde68a; }
+        .sev.low { background: #334155; color: #e2e8f0; }
+        .sev.none { color: #94a3b8; font-weight: 400; }
+
+        details.packages summary {
+            cursor: pointer;
+            color: #e2e8f0;
+            font-size: var(--font-size-sm);
+            margin-bottom: 8px;
+        }
+
+        .pkg-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 2px 24px;
+        }
+
+        .pkg-grid .vulnerable {
+            color: #f87171;
+        }
+
+        @media (max-width: 768px) {
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .layout {
+                grid-template-columns: 1fr;
+                grid-template-rows: 220px 1fr;
+            }
+
+            #history {
+                border-right: none;
+                border-bottom: 1px solid #334155;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="topbar">
+        <span class="topbar-title">Security audit</span>
+        <span class="status" id="status"><span class="status-dot"></span><span id="statusText">Loading&hellip;</span></span>
+    </div>
+
+    <div class="toolbar">
+        <button id="btnRun" class="tb-btn" type="button">Run audit now</button>
+        <span class="hint" id="runHint"></span>
+        <span class="spacer"></span>
+        <span class="hint">Installed packages checked against osv.dev once a day</span>
+    </div>
+
+    <div class="layout">
+        <div id="history"></div>
+        <div id="detail"><div class="notice">Select a report.</div></div>
+    </div>
+
+    <script>
+        const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        const RUNNING_POLL_MS = 3000;
+
+        const historyEl = document.getElementById('history');
+        const detailEl = document.getElementById('detail');
+        const statusEl = document.getElementById('status');
+        const statusText = document.getElementById('statusText');
+        const btnRun = document.getElementById('btnRun');
+        const runHint = document.getElementById('runHint');
+
+        let reports = [];
+        let selectedId = null;
+        let pollTimer = null;
+
+        function el(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined) node.textContent = text;
+            return node;
+        }
+
+        function formatDate(iso) {
+            const d = new Date(iso);
+            return isNaN(d) ? iso : d.toLocaleString('nl-NL', { dateStyle: 'medium', timeStyle: 'short' });
+        }
+
+        function resultOf(r) {
+            if (r.status === 'error') return { cls: 'error', text: 'Check failed' };
+            if (r.vulnerability_count > 0) {
+                const n = r.vulnerability_count;
+                return { cls: 'vuln', text: `${n} vulnerabilit${n === 1 ? 'y' : 'ies'}` };
+            }
+            return { cls: 'ok', text: 'No known vulnerabilities' };
+        }
+
+        function sevClass(sev) {
+            const s = (sev || '').toUpperCase();
+            if (s === 'CRITICAL' || s === 'HIGH') return 'high';
+            if (s === 'MODERATE' || s === 'MEDIUM') return 'med';
+            if (s === 'LOW') return 'low';
+            return 'none';
+        }
+
+        function setRunning(running) {
+            btnRun.disabled = running;
+            runHint.textContent = running ? 'Audit running… this can take up to a minute.' : '';
+            if (running) {
+                statusEl.dataset.state = 'running';
+                statusText.textContent = 'Audit running…';
+            }
+        }
+
+        function updateStatus() {
+            if (btnRun.disabled) return;
+            if (!reports.length) {
+                statusEl.dataset.state = '';
+                statusText.textContent = 'No audits yet';
+                return;
+            }
+            const latest = reports[0];
+            const res = resultOf(latest);
+            statusEl.dataset.state = res.cls === 'vuln' ? 'vulnerable' : res.cls;
+            statusText.textContent = `Last check ${formatDate(latest.timestamp)}: ${res.text.toLowerCase()}`;
+        }
+
+        function renderHistory() {
+            historyEl.innerHTML = '';
+            if (!reports.length) {
+                const n = el('div', 'notice', 'No audits have run yet. Click "Run audit now" to start one.');
+                n.style.padding = '12px 16px';
+                historyEl.appendChild(n);
+                return;
+            }
+            for (const r of reports) {
+                const res = resultOf(r);
+                const item = el('button', 'hist-item' + (r.id === selectedId ? ' active' : ''));
+                item.type = 'button';
+                item.appendChild(el('div', 'hist-date', formatDate(r.timestamp)));
+                const meta = el('div', 'hist-meta');
+                meta.appendChild(el('span', '', `${r.trigger} · ${r.package_count} packages`));
+                meta.appendChild(el('span', 'badge ' + res.cls, res.text));
+                item.appendChild(meta);
+                item.addEventListener('click', () => selectReport(r.id));
+                historyEl.appendChild(item);
+            }
+        }
+
+        function fact(label, value) {
+            const box = el('div');
+            box.appendChild(el('div', 'fact-label', label));
+            box.appendChild(el('div', 'fact-value', value));
+            return box;
+        }
+
+        function renderReport(r) {
+            detailEl.innerHTML = '';
+            detailEl.appendChild(el('h1', 'report-title', `Audit of ${formatDate(r.timestamp)}`));
+
+            const facts = el('div', 'facts');
+            facts.appendChild(fact('Trigger', r.trigger));
+            facts.appendChild(fact('Packages checked', String(r.package_count)));
+            facts.appendChild(fact('Python', r.python));
+            facts.appendChild(fact('Duration', r.duration_seconds !== undefined ? `${r.duration_seconds} s` : '–'));
+            facts.appendChild(fact('Environment', r.environment));
+            detailEl.appendChild(facts);
+
+            const res = resultOf(r);
+            if (r.status === 'error') {
+                detailEl.appendChild(el('div', 'result-box error',
+                    `The vulnerability database could not be reached, so this audit has no result. ${r.error || ''}`));
+            } else if (!r.findings.length) {
+                detailEl.appendChild(el('div', 'result-box ok',
+                    `No known vulnerabilities in the ${r.package_count} installed packages.`));
+            } else {
+                const pkgs = r.vulnerable_packages || [];
+                detailEl.appendChild(el('div', 'result-box vuln',
+                    `${res.text} in ${pkgs.length} package${pkgs.length === 1 ? '' : 's'}: ${pkgs.join(', ')}. ` +
+                    'Update to a version listed under "Fixed in".'));
+                detailEl.appendChild(renderFindings(r.findings));
+            }
+
+            const vulnerable = new Set(r.vulnerable_packages || []);
+            const details = el('details', 'packages');
+            details.appendChild(el('summary', '', `Installed packages (${r.packages.length})`));
+            const grid = el('div', 'pkg-grid mono');
+            for (const p of r.packages) {
+                grid.appendChild(el('div', vulnerable.has(p.name) ? 'vulnerable' : '', `${p.name}==${p.version}`));
+            }
+            details.appendChild(grid);
+            detailEl.appendChild(details);
+        }
+
+        function renderFindings(findings) {
+            const table = el('table', 'findings');
+            const head = el('tr');
+            for (const h of ['Package', 'Severity', 'Advisory', 'CVE', 'Fixed in', 'Published', 'Summary']) {
+                head.appendChild(el('th', '', h));
+            }
+            table.appendChild(el('thead')).appendChild(head);
+
+            const body = el('tbody');
+            for (const f of findings) {
+                const tr = el('tr');
+                tr.appendChild(el('td', 'mono', `${f.package} ${f.version}`));
+
+                const sevTd = el('td');
+                sevTd.appendChild(el('span', 'sev ' + sevClass(f.severity), f.severity || 'unrated'));
+                tr.appendChild(sevTd);
+
+                const advTd = el('td', 'mono');
+                const link = el('a', '', f.id);
+                link.href = 'https://osv.dev/vulnerability/' + encodeURIComponent(f.id);
+                link.target = '_blank';
+                link.rel = 'noopener noreferrer';
+                advTd.appendChild(link);
+                tr.appendChild(advTd);
+
+                tr.appendChild(el('td', 'mono', f.cves.join(', ') || '–'));
+                tr.appendChild(el('td', 'mono', f.fixed_versions.join(', ') || 'no fix yet'));
+                tr.appendChild(el('td', 'mono', f.published || '–'));
+                tr.appendChild(el('td', '', f.summary || ''));
+                body.appendChild(tr);
+            }
+            table.appendChild(body);
+            return table;
+        }
+
+        async function selectReport(id) {
+            selectedId = id;
+            renderHistory();
+            try {
+                const resp = await fetch(`/api/security-audit/reports/${encodeURIComponent(id)}`, { cache: 'no-store' });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) throw new Error(data.error || resp.statusText);
+                if (selectedId === id) renderReport(data.report);
+            } catch (err) {
+                detailEl.innerHTML = '';
+                detailEl.appendChild(el('div', 'result-box error', `Could not load the report: ${err.message}`));
+            }
+        }
+
+        async function loadReports(selectNewest = false) {
+            clearTimeout(pollTimer);
+            try {
+                const resp = await fetch('/api/security-audit/reports', { cache: 'no-store' });
+                const data = await resp.json();
+                if (!resp.ok || !data.success) throw new Error(data.error || resp.statusText);
+                reports = data.reports;
+                setRunning(data.running);
+                if (data.running) pollTimer = setTimeout(() => loadReports(true), RUNNING_POLL_MS);
+            } catch (err) {
+                statusEl.dataset.state = 'error';
+                statusText.textContent = 'Could not load reports';
+                return;
+            }
+            renderHistory();
+            updateStatus();
+            const keep = reports.some(r => r.id === selectedId);
+            if (reports.length && (selectNewest || !keep)) selectReport(reports[0].id);
+        }
+
+        btnRun.addEventListener('click', async () => {
+            setRunning(true);
+            let failure = null;
+            try {
+                const resp = await fetch('/api/security-audit/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken },
+                    body: '{}',
+                });
+                const data = await resp.json();
+                // 409: a scheduled audit is already running; just wait for it
+                if (!resp.ok && resp.status !== 409) throw new Error(data.error || resp.statusText);
+            } catch (err) {
+                failure = err.message;
+            }
+            await loadReports(true);
+            if (failure) runHint.textContent = `Audit failed: ${failure}`;
+        });
+
+        loadReports();
+    </script>
+</body>
+
+</html>

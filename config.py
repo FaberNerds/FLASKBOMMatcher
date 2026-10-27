@@ -14,6 +14,15 @@ BASE_DIR = Path(__file__).parent.resolve()
 UPLOAD_FOLDER = BASE_DIR / 'uploads'
 UPLOAD_FOLDER.mkdir(exist_ok=True)
 
+# Log files (service_*.log are only written when running as a Windows service)
+LOG_FILE = BASE_DIR / 'server.log'
+SERVICE_STDOUT_LOG = BASE_DIR / 'service_stdout.log'
+SERVICE_STDERR_LOG = BASE_DIR / 'service_stderr.log'
+
+# Security audit reports (known vulnerabilities in installed packages).
+# Not inside uploads/: that folder is cleaned on startup.
+SECURITY_AUDIT_FOLDER = BASE_DIR / 'security_audit'
+
 # Allowed file extensions
 ALLOWED_EXTENSIONS = {'xlsx', 'xls', 'csv'}
 

@@ -29,3 +29,6 @@ ssl2/
 # Spec file
 *.md
 !README.md
+
+# Security audit reports (production data)
+security_audit/

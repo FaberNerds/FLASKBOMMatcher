@@ -6,6 +6,33 @@
 <a href="/" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">&lt;&lt; Back</a>
 {% endblock %}
 
+{% block extra_styles %}
+<style>
+    /* Logging card */
+    .log-buttons {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 16px;
+    }
+
+    .log-buttons .btn {
+        width: 100%;
+    }
+
+    .log-hint {
+        font-size: var(--font-size-xs);
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+
+    @media (max-width: 600px) {
+        .log-buttons {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div style="max-width: 700px; margin: 0 auto;">
     <h2 style="margin-bottom: 24px;">Settings</h2>
@@ -105,11 +132,53 @@
             </div>
         </div>
     </div>
+
+    <!-- Logging -->
+    <div class="card" style="margin-bottom: 20px;">
+        <div class="card-header">
+            <h3 class="card-title">Logging</h3>
+            <p class="card-subtitle">Open a log file in a new window and follow it live, or view the security audit history</p>
+        </div>
+        <div class="card-body">
+            <div class="log-buttons">
+                <div>
+                    <button type="button" class="btn btn-outline" data-log="server">server.log</button>
+                    <div class="log-hint">Application log</div>
+                </div>
+                <div>
+                    <button type="button" class="btn btn-outline" data-log="stdout">service_stdout.log</button>
+                    <div class="log-hint">Service output (Windows service only)</div>
+                </div>
+                <div>
+                    <button type="button" class="btn btn-outline" data-log="stderr">service_stderr.log</button>
+                    <div class="log-hint">Service errors (Windows service only)</div>
+                </div>
+                <div>
+                    <button type="button" class="btn btn-outline" id="btnSecurityAudit">Security audit</button>
+                    <div class="log-hint">Known vulnerabilities in installed packages (checked daily)</div>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
+    // --- Live log windows (one named window per log, so a second click refocuses it) ---
+    document.querySelectorAll('.log-buttons [data-log]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const name = btn.dataset.log;
+            const win = window.open('/settings/logs/' + name, 'log_' + name, 'width=1200,height=800');
+            if (win) win.focus();
+        });
+    });
+
+    document.getElementById('btnSecurityAudit').addEventListener('click', () => {
+        const win = window.open('/settings/security-audit', 'security_audit', 'width=1300,height=850');
+        if (win) win.focus();
+    });
+
     async function testConnection() {
         const btn = document.getElementById('testConnectionBtn');
         const result = document.getElementById('connectionResult');
