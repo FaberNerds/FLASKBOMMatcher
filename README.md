@@ -162,7 +162,7 @@ Create a `.env` file (or use the included `.flaskenv` for development):
 
 ```ini
 FLASK_DEBUG=true        # Enable debug mode (development only)
-FLASK_PORT=50085        # Server port
+FLASK_PORT=50091        # Server port
 FLASK_HOST=0.0.0.0      # Bind address
 ```
 
@@ -182,7 +182,7 @@ Or configure via the Settings page (`/settings`) after first launch.
 python app.py
 ```
 
-Open `http://localhost:50085` in your browser.
+Open `http://localhost:50091` in your browser.
 
 On first startup the application will:
 - Load the customer (Klant) cache from ERP
@@ -211,7 +211,7 @@ python app.py update
 python app.py remove
 ```
 
-The service runs Cheroot with SSL on the configured port (default 50085).
+The service runs Cheroot with SSL on the configured port (default 50091).
 
 ---
 
@@ -223,7 +223,7 @@ All configuration is managed through environment variables and [config.py](confi
 |----------|---------|-------------|
 | `FLASK_DEBUG` | `false` | Enable debug mode |
 | `FLASK_HOST` | `0.0.0.0` | Bind address |
-| `FLASK_PORT` | `50085` | Server port |
+| `FLASK_PORT` | `50091` | Server port |
 | `USE_HTTPS` | `false` | Enable SSL (requires certs in `ssl/`) |
 | `SECRET_KEY` | auto-generated | Flask secret key (stored encrypted in `~/.bommatcher/`) |
 | `FILE_RETENTION_HOURS` | `168` | Hours before uploaded files are auto-deleted |
