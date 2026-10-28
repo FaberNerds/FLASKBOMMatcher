@@ -10,7 +10,8 @@ ENV/
 # Flask/Temporary files
 uploads/
 temp/
-server.log
+*.log
+.env
 instance/
 .webassets-cache
 
