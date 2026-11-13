@@ -2,147 +2,146 @@
 
 {% block title %}BOM Matcher - Upload{% endblock %}
 
-{% block topbar_actions %}
-<div style="display: flex; gap: 8px;">
-    <a href="/history" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">History</a>
-    <a href="/settings" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">Settings</a>
-</div>
-{% endblock %}
-
 {% block content %}
-<div class="card" style="max-width: 900px; margin: 0 auto;">
-    <div class="card-header">
-        <h2 class="card-title">Upload BOM File</h2>
-        <p class="card-subtitle">Upload an Excel or CSV file, then map columns to proceed</p>
+<div class="upload-page">
+    <div class="fx-page-head page-head">
+        <div class="fx-page-head-text">
+            <h1 class="fx-heading">Upload BOM file</h1>
+            <p class="fx-page-sub">Upload an Excel or CSV file, then map columns to proceed</p>
+        </div>
     </div>
-    <div class="card-body">
-        <!-- Drop Zone -->
-        <div class="upload-zone" id="dropZone">
-            <div class="upload-zone-content">
-                <div style="font-size: 48px; margin-bottom: 12px;">📁</div>
-                <p style="font-size: 16px; font-weight: 600; margin: 0 0 4px;">Drop BOM file here or click to browse</p>
-                <p style="color: var(--text-muted); margin: 0;">Supports .xlsx, .xls, .csv</p>
-            </div>
-            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display: none;">
-        </div>
 
-        <!-- File Info (shown after upload) -->
-        <div id="fileInfo" style="display: none; margin-top: 20px;">
-            <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--color-success-light); border-radius: var(--radius-md);">
-                <span style="font-size: 20px;">✓</span>
-                <div>
-                    <strong id="fileName"></strong>
-                    <span id="fileRowCount" style="color: var(--text-muted); margin-left: 8px;"></span>
+    <div class="card upload-main-card">
+        <div class="card-body">
+            <!-- Drop Zone -->
+            <div class="upload-zone" id="dropZone">
+                <div class="upload-zone-content">
+                    <div class="upload-zone-icon">{{ icon('upload') }}</div>
+                    <p class="upload-zone-title">Drop BOM file here or click to browse</p>
+                    <p class="upload-zone-subtitle">Supports <span class="fx-mono">.xlsx</span>, <span class="fx-mono">.xls</span>, <span class="fx-mono">.csv</span></p>
+                </div>
+                <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display: none;">
+            </div>
+
+            <!-- File Info (shown after upload) -->
+            <div id="fileInfo" class="upload-section" style="display: none;">
+                <div class="fx-notice fx-notice-success">
+                    {{ icon('file') }}
+                    <div>
+                        <strong id="fileName"></strong>
+                        <span id="fileRowCount" class="notice-meta"></span>
+                    </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Sheet Selector -->
-        <div id="sheetSelector" style="display: none; margin-top: 16px;">
-            <label class="form-label">Sheet</label>
-            <select id="sheetSelect" class="form-select">
-            </select>
-        </div>
-
-        <!-- Row Range Controls -->
-        <div id="rowRangeSection" style="display: none; margin-top: 16px;">
-            <label class="form-label">Data Row Range</label>
-            <div class="row-range-section">
-                <div class="row-range-input">
-                    <label>Start row:</label>
-                    <input type="number" id="startRowInput" min="1" class="form-input" placeholder="All">
-                </div>
-                <div class="row-range-input">
-                    <label>End row:</label>
-                    <input type="number" id="endRowInput" min="1" class="form-input" placeholder="All">
-                </div>
-                <button class="btn btn-outline row-range-apply" onclick="applyRowRange()">Apply</button>
-                <button class="btn btn-outline row-range-apply" onclick="clearRowRange()" style="color: var(--text-muted);">Clear</button>
+            <!-- Sheet Selector -->
+            <div id="sheetSelector" class="upload-section-sm" style="display: none;">
+                <label class="form-label" for="sheetSelect">Sheet</label>
+                <select id="sheetSelect" class="form-select sheet-select">
+                </select>
             </div>
-        </div>
 
-        <!-- Preview Table -->
-        <div id="previewSection" style="display: none; margin-top: 20px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Preview (right-click rows to set header/range)</h3>
-            <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
-                <table class="data-table" id="previewTable">
-                    <thead id="previewHead"></thead>
-                    <tbody id="previewBody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Previous Version (Exact) -->
-        <div id="previousBomSection" style="display: none; margin-top: 24px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Previous Version (Exact)</h3>
-            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
-                Enter the article number of the previous board version to fetch its BOM from Exact.
-                When loaded, Process BOM matches this new BOM against the old one (reusing already-purchased
-                Faber articles) instead of the live ERP catalog.
-            </p>
-            <div style="display: flex; gap: 8px; align-items: center; max-width: 480px;">
-                <input type="text" id="previousArticleId" class="form-input" placeholder="e.g. 300001234"
-                       autocomplete="off" style="flex: 1;"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault();fetchPreviousBom();}">
-                <button class="btn btn-primary" id="fetchPreviousBtn" onclick="fetchPreviousBom()">Fetch</button>
-            </div>
-            <div id="previousBomInfo" style="display: none; margin-top: 10px; padding: 8px 12px; background: var(--color-success-light); border-radius: var(--radius-md); align-items: center; gap: 8px;">
-                <span style="font-size: 16px;">✅</span>
-                <span id="previousBomInfoText"></span>
-                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px; margin-left: auto;" onclick="clearPreviousBom()">✕ Clear</button>
-            </div>
-        </div>
-
-        <!-- Column Mapping -->
-        <div id="mappingSection" style="display: none; margin-top: 24px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Column Mapping</h3>
-            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 16px;">
-                Map your BOM columns to standard fields. Select multiple columns to combine them. Description is required.
-            </p>
-            <div class="mapping-grid" id="mappingGrid">
-                <!-- Filled by JS -->
-            </div>
-        </div>
-
-        <!-- Customer Selector -->
-        <div id="customerSection" style="display: none; margin-top: 24px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Klant (Customer)</h3>
-            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
-                Select a customer to include customer-specific parts in matching. Leave empty for generic matching.
-            </p>
-            <div style="position: relative;">
-                <input type="text" id="customerSearch" class="form-input" placeholder="Search customer..."
-                       autocomplete="off" style="width: 100%; max-width: 400px;">
-                <div id="customerDropdown" class="customer-dropdown" style="display: none;">
+            <!-- Row Range Controls -->
+            <div id="rowRangeSection" class="upload-section-sm" style="display: none;">
+                <span class="form-label">Data row range</span>
+                <div class="row-range-section">
+                    <div class="row-range-input">
+                        <label for="startRowInput">Start row:</label>
+                        <input type="number" id="startRowInput" min="1" class="form-input" placeholder="All">
+                    </div>
+                    <div class="row-range-input">
+                        <label for="endRowInput">End row:</label>
+                        <input type="number" id="endRowInput" min="1" class="form-input" placeholder="All">
+                    </div>
+                    <button class="btn btn-small row-range-apply" onclick="applyRowRange()">Apply</button>
+                    <button class="btn btn-ghost btn-small row-range-apply" onclick="clearRowRange()">Clear</button>
                 </div>
             </div>
-            <div id="selectedCustomer" style="display: none; margin-top: 8px; padding: 8px 12px; background: var(--color-success-light); border-radius: var(--radius-md); align-items: center; gap: 8px;">
-                <span id="selectedCustomerText"></span>
-                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="clearCustomerSelection()">✕</button>
-            </div>
-        </div>
 
-        <!-- Process Button -->
-        <div id="processSection" style="display: none; margin-top: 24px; justify-content: space-between; align-items: center;">
-            <button class="btn btn-outline" id="clearProcessDataBtn" onclick="clearProcessData()" style="display: none; color: var(--color-warning); border-color: var(--color-warning);">
-                Clear stored process data
-            </button>
-            <div style="margin-left: auto;">
-                <button class="btn btn-primary btn-lg" id="processBtn" onclick="processBom()">
-                    Process BOM &gt;&gt;
+            <!-- Preview Table -->
+            <div id="previewSection" class="upload-section" style="display: none;">
+                <h3 class="section-title">Preview <span class="section-hint">Right-click rows to set header/range</span></h3>
+                <div class="preview-scroll">
+                    <table class="data-table" id="previewTable">
+                        <thead id="previewHead"></thead>
+                        <tbody id="previewBody"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Previous Version (Exact) -->
+            <div id="previousBomSection" class="upload-section" style="display: none;">
+                <h3 class="section-title">Previous version (Exact)</h3>
+                <p class="section-text">
+                    Enter the article number of the previous board version to fetch its BOM from Exact.
+                    When loaded, Process BOM matches this new BOM against the old one (reusing already-purchased
+                    Faber articles) instead of the live ERP catalog.
+                </p>
+                <div class="inline-field">
+                    <input type="text" id="previousArticleId" class="form-input fx-mono" placeholder="e.g. 300001234"
+                           autocomplete="off"
+                           onkeydown="if(event.key==='Enter'){event.preventDefault();fetchPreviousBom();}">
+                    <button class="btn" id="fetchPreviousBtn" onclick="fetchPreviousBom()">{{ icon('database') }} Fetch</button>
+                </div>
+                <div id="previousBomInfo" class="fx-notice fx-notice-success notice-inline" style="display: none;">
+                    {{ icon('check') }}
+                    <span id="previousBomInfoText"></span>
+                    <button class="btn btn-ghost btn-small notice-action" onclick="clearPreviousBom()">{{ icon('close') }} Clear</button>
+                </div>
+            </div>
+
+            <!-- Column Mapping -->
+            <div id="mappingSection" class="upload-section" style="display: none;">
+                <h3 class="section-title">Column mapping</h3>
+                <p class="section-text">
+                    Map your BOM columns to standard fields. Select multiple columns to combine them. Description is required.
+                </p>
+                <div class="mapping-grid" id="mappingGrid">
+                    <!-- Filled by JS -->
+                </div>
+            </div>
+
+            <!-- Customer Selector -->
+            <div id="customerSection" class="upload-section" style="display: none;">
+                <h3 class="section-title">Klant (Customer)</h3>
+                <p class="section-text">
+                    Select a customer to include customer-specific parts in matching. Leave empty for generic matching.
+                </p>
+                <div class="customer-search">
+                    <input type="text" id="customerSearch" class="form-input" placeholder="Search customer..."
+                           autocomplete="off">
+                    <div id="customerDropdown" class="customer-dropdown" style="display: none;">
+                    </div>
+                </div>
+                <div id="selectedCustomer" class="fx-notice fx-notice-success notice-inline" style="display: none;">
+                    {{ icon('users') }}
+                    <span id="selectedCustomerText"></span>
+                    <button class="btn btn-ghost btn-small notice-action" onclick="clearCustomerSelection()" aria-label="Clear customer" title="Clear customer">{{ icon('close') }}</button>
+                </div>
+            </div>
+
+            <!-- Process Button -->
+            <div id="processSection" class="upload-section process-section" style="display: none;">
+                <button class="btn btn-danger" id="clearProcessDataBtn" onclick="clearProcessData()" style="display: none;">
+                    {{ icon('trash') }} Clear stored process data
                 </button>
+                <div class="process-section-main">
+                    <button class="btn btn-primary btn-lg" id="processBtn" onclick="processBom()">
+                        Process BOM {{ icon('next') }}
+                    </button>
+                </div>
             </div>
         </div>
     </div>
 </div>
 <!-- Right-click context menu -->
 <div id="rowContextMenu" class="row-context-menu" style="display: none;">
-    <div class="context-menu-item" onclick="setAsHeaderRow()">📋 Set as Header Row</div>
+    <div class="context-menu-item" onclick="setAsHeaderRow()">{{ icon('row-header') }} Set as header row</div>
     <div class="context-menu-divider"></div>
-    <div class="context-menu-item" onclick="setAsStartRow()">📍 Set as Start Row</div>
-    <div class="context-menu-item" onclick="setAsEndRow()">🏁 Set as End Row</div>
+    <div class="context-menu-item" onclick="setAsStartRow()">{{ icon('row-start') }} Set as start row</div>
+    <div class="context-menu-item" onclick="setAsEndRow()">{{ icon('row-end') }} Set as end row</div>
     <div class="context-menu-divider"></div>
-    <div class="context-menu-item" onclick="clearRowRangeMenu()">❌ Clear Selection</div>
+    <div class="context-menu-item" onclick="clearRowRangeMenu()">{{ icon('close') }} Clear selection</div>
 </div>
 {% endblock %}
 

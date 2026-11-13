@@ -6,12 +6,12 @@
     <title>{{ log_filename }} - Live log</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <!-- Google Fonts -->
+    <!-- Faber Huisstijl: Inter + IBM Plex Mono, tokens in faber.css -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 
-    <!-- Design System CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/faber.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
 
     <style>
@@ -23,127 +23,126 @@
         body {
             display: flex;
             flex-direction: column;
-            background: #0f172a;
+            gap: 12px;
+            padding: 14px 20px 20px;
+            box-sizing: border-box;
+            min-height: 0;
         }
 
         .topbar {
-            background: linear-gradient(90deg, var(--bg-header-gradient-start), var(--bg-header-gradient-end));
-            color: #f9fafb;
-            padding: 12px 20px;
-            display: flex;
+            padding: 0 16px 0 22px;
             justify-content: space-between;
-            align-items: center;
             gap: 16px;
-            box-shadow: var(--shadow-lg);
+            flex-shrink: 0;
         }
 
         .topbar-title {
-            font-size: 18px;
-            font-weight: 600;
-            font-family: Consolas, 'Cascadia Mono', monospace;
+            font-family: var(--font-mono);
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--ink);
+            overflow-wrap: anywhere;
         }
 
         .topbar-meta {
             display: flex;
             align-items: center;
             gap: 16px;
-            font-size: var(--font-size-sm);
-            color: #cbd5e1;
+            font-size: 12px;
+            line-height: 16px;
+            color: var(--ink-nav);
+        }
+
+        #size {
+            font-family: var(--font-mono);
         }
 
         .status {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
+            gap: 8px;
         }
 
+        /* Decor next to the status text; the text carries the meaning */
         .status-dot {
-            width: 9px;
-            height: 9px;
-            border-radius: 50%;
-            background: #94a3b8;
+            width: 8px;
+            height: 8px;
+            border-radius: 2px;
+            background: var(--ink-muted);
         }
 
-        .status[data-state="live"] .status-dot { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
-        .status[data-state="paused"] .status-dot { background: #94a3b8; }
-        .status[data-state="missing"] .status-dot { background: #f59e0b; }
-        .status[data-state="error"] .status-dot { background: #ef4444; }
+        .status[data-state="live"] .status-dot { background: var(--live); }
+        .status[data-state="paused"] .status-dot { background: var(--ink-muted); }
+        .status[data-state="missing"] .status-dot { background: var(--warning); }
+        .status[data-state="error"] .status-dot { background: var(--danger); }
 
         .toolbar {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 8px 20px;
-            background: #1e293b;
-            border-bottom: 1px solid #334155;
             flex-wrap: wrap;
+            flex-shrink: 0;
         }
 
         .toolbar .spacer {
             flex: 1;
         }
 
-        .tb-btn {
-            background: transparent;
-            border: 1px solid #475569;
-            color: #e2e8f0;
-            padding: 5px 12px;
-            border-radius: var(--radius-md);
-            font-size: var(--font-size-sm);
-            font-family: inherit;
-            cursor: pointer;
-        }
-
-        .tb-btn:hover {
-            border-color: #94a3b8;
-            background: rgba(255, 255, 255, 0.06);
-        }
-
+        /* Pause / Follow / Clear view: chips, the active one citroen */
         .tb-btn.active {
-            background: var(--color-primary);
-            border-color: var(--color-primary);
-            color: white;
+            background: var(--citroen);
+            border-color: var(--citroen);
+            color: var(--on-citroen);
         }
 
         .filter-input {
-            background: #0f172a;
-            border: 1px solid #475569;
-            color: #e2e8f0;
-            padding: 5px 10px;
-            border-radius: var(--radius-md);
-            font-size: var(--font-size-sm);
+            height: var(--control-sm);
+            padding: 0 12px;
+            border: 1px solid var(--line-control);
+            border-radius: var(--radius-pill);
+            background: var(--surface-glass);
+            color: var(--ink);
+            font: inherit;
+            font-size: 13px;
             width: 260px;
         }
 
         .filter-input:focus {
             outline: none;
-            border-color: var(--color-primary);
+            border-color: var(--focus);
+            box-shadow: 0 0 0 1px var(--focus);
         }
 
         .line-count {
-            color: #94a3b8;
-            font-size: var(--font-size-sm);
+            color: var(--ink-muted);
+            font-size: 12px;
         }
 
+        /* The log itself: plain white panel (no glass), Plex Mono */
         #log {
             flex: 1;
+            min-height: 0;
             overflow: auto;
-            padding: 8px 20px 16px;
-            font-family: Consolas, 'Cascadia Mono', 'Courier New', monospace;
+            padding: 12px 18px 16px;
+            background: var(--surface-raised);
+            border: 1px solid var(--line-solid);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-glass);
+            font-family: var(--font-mono);
             font-size: 12.5px;
-            line-height: 1.5;
-            color: #cbd5e1;
+            line-height: 1.55;
+            color: var(--ink);
             white-space: pre-wrap;
             word-break: break-all;
         }
 
-        #log .ln.warn { color: #fbbf24; }
-        #log .ln.err { color: #f87171; }
+        #log .ln.warn { color: var(--warning); background: var(--warning-soft); }
+        #log .ln.err { color: var(--danger); background: var(--danger-soft); }
         #log .ln.hidden { display: none; }
 
         .notice {
-            color: #94a3b8;
-            font-style: italic;
+            color: var(--ink-muted);
+            font-family: var(--font-sans);
             padding: 12px 0;
         }
 
@@ -151,18 +150,18 @@
             .topbar {
                 flex-direction: column;
                 align-items: flex-start;
+                padding: 10px 14px;
             }
 
             .filter-input {
                 width: 100%;
             }
         }
-    </style>
-</head>
+    </style></head>
 
-<body>
-    <div class="topbar">
-        <span class="topbar-title">{{ log_filename }}</span>
+<body class="fx-page">
+    <div class="fx-mast topbar">
+        <span class="fx-mast-brand"><img class="fx-mast-logo" src="{{ url_for('static', filename='img/faber-logo-blue.svg') }}" alt="Faber Electronics" width="69" height="28"><span class="fx-mast-tool">Live log</span><span class="topbar-title">{{ log_filename }}</span></span>
         <div class="topbar-meta">
             <span id="size"></span>
             <span class="status" id="status" data-state="live"><span class="status-dot"></span><span id="statusText">Connecting&hellip;</span></span>
@@ -170,9 +169,9 @@
     </div>
 
     <div class="toolbar">
-        <button id="btnPause" class="tb-btn" type="button">Pause</button>
-        <button id="btnFollow" class="tb-btn active" type="button" title="Keep scrolled to the newest line">Follow</button>
-        <button id="btnClear" class="tb-btn" type="button" title="Clear the window (the file is not touched)">Clear view</button>
+        <button id="btnPause" class="fx-chip tb-btn" type="button">Pause</button>
+        <button id="btnFollow" class="fx-chip tb-btn active" type="button" title="Keep scrolled to the newest line">Follow</button>
+        <button id="btnClear" class="fx-chip tb-btn" type="button" title="Clear the window (the file is not touched)">Clear view</button>
         <input id="filter" class="filter-input" type="search" placeholder="Filter lines&hellip;" autocomplete="off">
         <span class="spacer"></span>
         <span class="line-count" id="lineCount"></span>
@@ -309,7 +308,7 @@
                     if (!logEl.querySelector('.ln')) showNotice('The log is empty. Waiting for new lines…');
                 }
             } catch (err) {
-                setStatus('error', 'Connection lost — retrying');
+                setStatus('error', 'Connection lost. Retrying');
             }
             inFlight = false;
             schedule();

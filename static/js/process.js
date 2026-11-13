@@ -732,7 +732,7 @@ function renderScore(suggestion, match) {
     const score = suggestion._similarity_score;
     if (score !== undefined && score !== null) {
         const pct = Math.round(score);
-        const color = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+        const color = pct >= 80 ? 'var(--success)' : pct >= 50 ? 'var(--amber)' : 'var(--danger)';
         return `<span class="score-bar">
             <span class="score-bar-fill">
                 <span class="score-bar-fill-inner" style="width: ${pct}%; background: ${color};"></span>
@@ -744,8 +744,8 @@ function renderScore(suggestion, match) {
     // For MPN matches, show confidence indicator
     if (match && match.search_method === 'mpn') {
         const conf = match.confidence;
-        if (conf === 'high') return '<span style="color: #10b981; font-weight: 600;">Exact</span>';
-        if (conf === 'medium') return '<span style="color: #f59e0b;">Partial</span>';
+        if (conf === 'high') return '<span style="color: var(--success); font-weight: 600;">Exact</span>';
+        if (conf === 'medium') return '<span style="color: var(--warning);">Partial</span>';
     }
 
     return '';

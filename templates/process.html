@@ -2,60 +2,68 @@
 
 {% block title %}BOM Matcher - Process{% endblock %}
 
-{% block topbar_actions %}
-<div style="display: flex; gap: 8px;">
-    <a href="/?back=1" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">&lt;&lt; Back</a>
-    <a href="/settings" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">Settings</a>
-</div>
-{% endblock %}
-
 {% block content %}
 <!-- Toolbar -->
-<div class="toolbar" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
-    <h2 style="margin: 0; font-size: 18px; flex: 1;">
-        BOM: <span id="bomName" style="color: var(--color-primary);"></span>
-        <span id="bomStats" style="color: var(--text-muted); font-size: 13px; margin-left: 8px;"></span>
-    </h2>
-    <button class="btn btn-outline" id="selectMpnfreeBtn" onclick="selectMpnfree()">Select MPNfree</button>
-    <button class="btn btn-primary" onclick="findIpn()">Find IPN</button>
-    <button class="btn btn-outline" id="copyModeBtn" onclick="toggleCopyMode()">Copy: OFF</button>
-    <button class="btn btn-outline" id="deleteModeBtn" onclick="toggleDeleteMode()">Delete: OFF</button>
-    <button class="btn btn-outline" onclick="exportBom()">Export</button>
-    <div style="display: flex; align-items: center; gap: 4px; margin-left: 8px; border-left: 1px solid var(--border-color); padding-left: 8px;">
-        <button class="btn btn-outline btn-sm" onclick="adjustZoom(-5)" title="Zoom out" style="padding: 2px 6px; min-width: 24px;">-</button>
-        <span id="zoomLevel" style="font-size: 11px; color: var(--text-muted); min-width: 32px; text-align: center; cursor: pointer;" onclick="resetZoom()" title="Click to reset">100%</span>
-        <button class="btn btn-outline btn-sm" onclick="adjustZoom(5)" title="Zoom in" style="padding: 2px 6px; min-width: 24px;">+</button>
+<div class="toolbar process-toolbar">
+    <a href="/?back=1" class="btn btn-ghost btn-small toolbar-back" title="Back to upload and column mapping">{{ icon('back') }} Back</a>
+    <h1 class="toolbar-title">
+        BOM: <span id="bomName"></span>
+        <span id="bomStats" class="toolbar-meta fx-mono"></span>
+    </h1>
+    <div class="toolbar-actions">
+        <button class="btn" id="selectMpnfreeBtn" onclick="selectMpnfree()">Select MPNfree</button>
+        <button class="btn btn-primary" onclick="findIpn()">{{ icon('search') }} Find IPN</button>
+        <button class="btn btn-outline" id="copyModeBtn" onclick="toggleCopyMode()">Copy: OFF</button>
+        <button class="btn btn-outline" id="deleteModeBtn" onclick="toggleDeleteMode()">Delete: OFF</button>
+        <button class="btn" onclick="exportBom()">{{ icon('export') }} Export</button>
+        <div class="zoom-control" role="group" aria-label="Zoom">
+            <button class="btn btn-small zoom-btn" onclick="adjustZoom(-5)" title="Zoom out" aria-label="Zoom out">{{ icon('minus') }}</button>
+            <span id="zoomLevel" class="zoom-level fx-mono" onclick="resetZoom()" title="Click to reset">100%</span>
+            <button class="btn btn-small zoom-btn" onclick="adjustZoom(5)" title="Zoom in" aria-label="Zoom in">{{ icon('plus') }}</button>
+        </div>
     </div>
 </div>
 
 <!-- Summary Badges -->
-<div id="summaryBadges" style="display: none; margin-bottom: 12px;">
-    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-        <div class="summary-badge summary-badge-green">
-            <span class="summary-badge-count" id="matchedCount">0</span>
-            <span class="summary-badge-label">Matched</span>
+<div id="summaryBadges" style="display: none;">
+    <div class="fx-stats summary-stats">
+        <div class="fx-stat fx-glass fx-tone-success">
+            <div class="fx-stat-icon">{{ icon('check') }}</div>
+            <div class="fx-stat-text">
+                <span class="fx-stat-label">Matched</span>
+                <span class="fx-stat-value" id="matchedCount">0</span>
+            </div>
         </div>
-        <div class="summary-badge summary-badge-yellow">
-            <span class="summary-badge-count" id="partialCount">0</span>
-            <span class="summary-badge-label">Partial</span>
+        <div class="fx-stat fx-glass fx-tone-warning">
+            <div class="fx-stat-icon">{{ icon('warning') }}</div>
+            <div class="fx-stat-text">
+                <span class="fx-stat-label">Partial</span>
+                <span class="fx-stat-value" id="partialCount">0</span>
+            </div>
         </div>
-        <div class="summary-badge summary-badge-red">
-            <span class="summary-badge-count" id="noMatchCount">0</span>
-            <span class="summary-badge-label">No match</span>
+        <div class="fx-stat fx-glass fx-tone-danger">
+            <div class="fx-stat-icon">{{ icon('close') }}</div>
+            <div class="fx-stat-text">
+                <span class="fx-stat-label">No match</span>
+                <span class="fx-stat-value" id="noMatchCount">0</span>
+            </div>
         </div>
-        <div class="summary-badge summary-badge-blue" id="paramBadge" style="display: none;">
-            <span class="summary-badge-count" id="paramCount">0</span>
-            <span class="summary-badge-label">Parameterized</span>
+        <div class="fx-stat fx-glass fx-tone-steel" id="paramBadge" style="display: none;">
+            <div class="fx-stat-icon">{{ icon('sliders') }}</div>
+            <div class="fx-stat-text">
+                <span class="fx-stat-label">Parameterized</span>
+                <span class="fx-stat-value" id="paramCount">0</span>
+            </div>
         </div>
     </div>
 </div>
 
 <!-- Search/Filter Bar -->
-<div id="filterBar" style="display: none; margin-bottom: 12px;">
-    <div style="display: flex; gap: 8px; align-items: center;">
-        <input type="text" class="form-input" id="searchInput" placeholder="Search..."
-               oninput="filterTable()" style="flex: 1; max-width: 300px;">
-        <select class="form-select" id="statusFilter" onchange="filterTable()" style="width: auto;">
+<div id="filterBar" style="display: none;">
+    <div class="filter-bar">
+        <input type="search" class="form-input filter-search" id="searchInput" placeholder="Search..."
+               oninput="filterTable()" aria-label="Search rows">
+        <select class="form-select filter-status" id="statusFilter" onchange="filterTable()" aria-label="Status">
             <option value="all">All status</option>
             <option value="matched">Matched</option>
             <option value="partial">Partial</option>
@@ -96,7 +104,7 @@
 
     <!-- Params Panel -->
     <div class="split-panel-params" id="paramsPanel">
-        <div class="split-panel-header">Params <span class="params-stats" id="paramsStats">0</span></div>
+        <div class="split-panel-header">Params <span class="params-stats fx-mono" id="paramsStats">0</span></div>
         <div class="split-panel-scroll" id="paramsScroll">
             <table class="params-table" id="paramsTable">
                 <thead>
@@ -105,7 +113,7 @@
                         <th title="Tolerance">%</th>
                         <th title="Voltage">V</th>
                         <th title="Power">P</th>
-                        <th title="Package">📦</th>
+                        <th title="Package" aria-label="Package">{{ icon('package') }}</th>
                     </tr>
                 </thead>
                 <tbody id="paramsTableBody"></tbody>

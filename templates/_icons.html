@@ -1,0 +1,44 @@
+{# Line icons of the Faber Huisstijl: 16px, stroke 1.5, currentColor, decorative (aria-hidden).
+   {% from "_icons.html" import icon %} ... {{ icon('export') }} #}
+{% set ICONS = {
+    'search': '<circle cx="7" cy="7" r="4.75"/><path d="M10.5 10.5L14 14"/>',
+    'sync': '<path d="M13.5 8a5.5 5.5 0 0 1-9.6 3.7"/><path d="M2.5 8a5.5 5.5 0 0 1 9.6-3.7"/><path d="M12.5 1.5v3h-3"/><path d="M3.5 14.5v-3h3"/>',
+    'compare': '<path d="M2.5 5.5h11"/><path d="M11 3l2.5 2.5L11 8"/><path d="M13.5 10.5h-11"/><path d="M5 8l-2.5 2.5L5 13"/>',
+    'export': '<path d="M8 2.5v8"/><path d="M4.75 7.25L8 10.5l3.25-3.25"/><path d="M3 13.5h10"/>',
+    'print': '<path d="M4.5 6V2.5h7V6"/><rect x="2.5" y="6" width="11" height="5.5" rx="1"/><path d="M4.5 9.5h7v4h-7z"/>',
+    'link': '<path d="M6.5 9.5l3-3"/><path d="M7 4.5l1-1a2.47 2.47 0 0 1 3.5 3.5l-1 1"/><path d="M9 11.5l-1 1a2.47 2.47 0 0 1-3.5-3.5l1-1"/>',
+    'unlink': '<path d="M7 4.5l1-1a2.47 2.47 0 0 1 3.5 3.5l-1 1"/><path d="M9 11.5l-1 1a2.47 2.47 0 0 1-3.5-3.5l1-1"/><path d="M2.5 2.5l2 2"/><path d="M13.5 13.5l-2-2"/>',
+    'reset': '<path d="M3 8a5 5 0 1 0 1.5-3.55"/><path d="M3 2.5v3h3"/>',
+    'close': '<path d="M4 4l8 8"/><path d="M12 4l-8 8"/>',
+    'star': '<path d="M8 2l1.8 3.9 4.2.4-3.2 2.8 1 4.2L8 11.1l-3.8 2.2 1-4.2L2 6.3l4.2-.4z"/>',
+    'log': '<rect x="3" y="2" width="10" height="12" rx="1.5"/><path d="M5.5 5.5h5"/><path d="M5.5 8h5"/><path d="M5.5 10.5h3"/>',
+    'shield': '<path d="M8 1.75l5 2v4c0 3-2.2 5.3-5 6.5-2.8-1.2-5-3.5-5-6.5v-4z"/>',
+    'edit': '<path d="M10.5 2.5l3 3-7.5 7.5H3v-3z"/>',
+    'check': '<path d="M3 8.5l3 3 7-7"/>',
+    'plus': '<path d="M8 3v10"/><path d="M3 8h10"/>',
+    'grid': '<rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/>',
+    'users': '<circle cx="6" cy="5.5" r="2.5"/><path d="M1.75 13.5a4.25 4.25 0 0 1 8.5 0"/><circle cx="11.5" cy="6" r="2"/><path d="M11.25 9.5a3.5 3.5 0 0 1 3 4"/>',
+    'chart': '<path d="M3 13.5V8"/><path d="M8 13.5V3"/><path d="M13 13.5V6"/>',
+    'caret': '<path d="M6 3.5L10.5 8 6 12.5"/>',
+    'warning': '<path d="M8 2.5l6 10.5H2z"/><path d="M8 6.5v3"/><path d="M8 11.5v.01"/>',
+    'upload': '<path d="M8 10.5v-8"/><path d="M4.75 5.75L8 2.5l3.25 3.25"/><path d="M3 13.5h10"/>',
+    'file': '<path d="M4 1.75h5.25L12.5 5v9.25H4z"/><path d="M9 1.75V5.25h3.5"/>',
+    'database': '<ellipse cx="8" cy="3.75" rx="5" ry="1.75"/><path d="M3 3.75v8.5c0 .97 2.24 1.75 5 1.75s5-.78 5-1.75v-8.5"/><path d="M3 8c0 .97 2.24 1.75 5 1.75S13 8.97 13 8"/>',
+    'tag': '<path d="M2.5 2.5h5l6 6-5 5-6-6z"/><circle cx="5.5" cy="5.5" r=".75"/>',
+    'package': '<path d="M8 1.75l5.5 3v6.5L8 14.25l-5.5-3v-6.5z"/><path d="M2.5 4.75L8 7.75l5.5-3"/><path d="M8 7.75v6.5"/>',
+    'sliders': '<path d="M2.5 4.5h2M7.5 4.5h6"/><path d="M2.5 11.5h6.5M12 11.5h1.5"/><circle cx="6" cy="4.5" r="1.5"/><circle cx="10.5" cy="11.5" r="1.5"/>',
+    'history': '<path d="M2.75 8a5.25 5.25 0 1 0 1.55-3.7"/><path d="M2.75 2.5v2.25H5"/><path d="M8 5.25V8l2 1.5"/>',
+    'back': '<path d="M13 8H3"/><path d="M7 4L3 8l4 4"/>',
+    'next': '<path d="M3 8h10"/><path d="M9 4l4 4-4 4"/>',
+    'minus': '<path d="M3 8h10"/>',
+    'copy': '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5v-2a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>',
+    'trash': '<path d="M2.5 4.5h11"/><path d="M6 4.5V2.75h4V4.5"/><path d="M4 4.5l.75 9h6.5l.75-9"/>',
+    'row-header': '<rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 6.5h11"/><path d="M2.5 6.5V4a1.5 1.5 0 0 1 1.5-1.5h8A1.5 1.5 0 0 1 13.5 4v2.5z" fill="currentColor" stroke="none"/>',
+    'row-start': '<path d="M2.5 2.75h11"/><path d="M8 5.5v8"/><path d="M5 8.5l3-3 3 3"/>',
+    'row-end': '<path d="M2.5 13.25h11"/><path d="M8 10.5v-8"/><path d="M5 7.5l3 3 3-3"/>',
+    'chevron-down': '<path d="M4 6l4 4 4-4"/>'
+} %}
+
+{% macro icon(name, cls='') -%}
+<svg class="fx-icon{{ ' ' ~ cls if cls }}" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{{ ICONS[name]|safe }}</svg>
+{%- endmacro %}

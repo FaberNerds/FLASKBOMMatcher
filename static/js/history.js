@@ -18,7 +18,7 @@ async function loadHistory() {
 function renderHistory(entries) {
     const tbody = document.getElementById('historyBody');
     if (!entries.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 24px;">No history entries yet. Process a BOM to see it here.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No history entries yet. Process a BOM to see it here.</td></tr>';
         return;
     }
 
@@ -27,20 +27,20 @@ function renderHistory(entries) {
         const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
         const badges = [];
-        if (e.has_matches) badges.push('<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:500; background:var(--color-success-light); color:var(--color-success);">Matched</span>');
-        if (e.has_mpnfree) badges.push('<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:500; background:var(--color-info-light, #e0f2fe); color:var(--color-info, #0284c7);">MPNfree</span>');
-        if (e.has_selections) badges.push('<span style="display:inline-block; padding:2px 8px; border-radius:10px; font-size:11px; font-weight:500; background:var(--color-warning-light, #fef3c7); color:var(--color-warning, #d97706);">Selections</span>');
+        if (e.has_matches) badges.push('<span class="badge badge-success">Matched</span>');
+        if (e.has_mpnfree) badges.push('<span class="badge badge-info">MPNfree</span>');
+        if (e.has_selections) badges.push('<span class="badge badge-warning">Selections</span>');
 
         const sessionId = escapeHtml(e.session_id);
         return `<tr>
-            <td><strong>${escapeHtml(e.bom_name)}</strong></td>
-            <td>${escapeHtml(e.klant_nr || '-')}</td>
-            <td>${e.row_count || '-'}</td>
-            <td>${badges.join(' ') || '<span style="color:var(--text-muted);">New</span>'}</td>
-            <td>${dateStr}</td>
-            <td>
-                <button class="btn btn-primary" style="padding:4px 12px; font-size:12px;" onclick="loadEntry('${sessionId}')">Load</button>
-                <button class="btn btn-outline" style="padding:4px 12px; font-size:12px; margin-left:4px;" onclick="deleteEntry('${sessionId}')">Delete</button>
+            <td class="cell-name">${escapeHtml(e.bom_name)}</td>
+            <td class="fx-mono">${escapeHtml(e.klant_nr || '-')}</td>
+            <td class="num">${e.row_count || '-'}</td>
+            <td><span class="badge-row">${badges.join(' ') || '<span class="badge badge-gray">New</span>'}</span></td>
+            <td class="fx-mono cell-date">${dateStr}</td>
+            <td class="col-actions">
+                <button class="btn btn-primary btn-small" onclick="loadEntry('${sessionId}')">Load</button>
+                <button class="btn btn-danger btn-small" onclick="deleteEntry('${sessionId}')">Delete</button>
             </td>
         </tr>`;
     }).join('');

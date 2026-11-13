@@ -566,7 +566,7 @@ async function populateMatcherParamsTable() {
                 <td><span class="param-indicator ${getIndicatorClass(params.toleranceStatus)}" data-tip="${fmt(params.tolerance1, params.tolerance2)}">%</span></td>
                 <td><span class="param-indicator ${getIndicatorClass(params.voltageStatus)}" data-tip="${fmt(params.voltage1, params.voltage2)}">V</span></td>
                 <td><span class="param-indicator ${getIndicatorClass(params.powerStatus)}" data-tip="${fmt(params.power1, params.power2)}">P</span></td>
-                <td><span class="param-indicator ${getIndicatorClass(params.packageStatus)}" data-tip="${fmt(params.package1, params.package2)}">📦</span></td>
+                <td><span class="param-indicator ${getIndicatorClass(params.packageStatus)}" data-tip="${fmt(params.package1, params.package2)}"><svg class="param-icon" viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" aria-label="Package" role="img"><path d="M8 1.75l5.5 3v6.5L8 14.25l-5.5-3v-6.5z"/><path d="M2.5 4.75L8 7.75l5.5-3"/><path d="M8 7.75v6.5"/></svg></span></td>
             `;
         } else {
             tr.innerHTML = `

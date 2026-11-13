@@ -445,7 +445,7 @@ function renderMapping() {
                 <div class="mapping-multiselect" data-standard="${escapeHtml(stdCol)}">
                     <div class="mapping-multiselect-display" onclick="toggleMappingDropdown(this)">
                         <span class="mapping-multiselect-text">-- not mapped --</span>
-                        <span class="mapping-multiselect-arrow">&#9662;</span>
+                        <span class="mapping-multiselect-arrow"><svg class="fx-icon" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg></span>
                     </div>
                     <div class="mapping-multiselect-dropdown" style="display: none;">
                         ${checkboxes}

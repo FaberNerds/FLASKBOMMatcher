@@ -63,17 +63,11 @@ class ToastManager {
         toast.setAttribute('role', 'alert');
         toast.setAttribute('data-toast-id', id);
 
-        const icons = {
-            success: '✓',
-            error: '✕',
-            warning: '⚠',
-            info: 'ℹ'
-        };
-
+        // Faber Huisstijl: a small square in the status colour, the message carries the meaning
         toast.innerHTML = `
-            <div class="toast-icon" aria-hidden="true">${icons[type] || icons.info}</div>
+            <span class="toast-icon" aria-hidden="true"></span>
             <div class="toast-message">${this.escapeHtml(message)}</div>
-            <button class="toast-close" aria-label="Close notification">×</button>
+            <button type="button" class="toast-close" aria-label="Close notification"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
         `;
 
         // Add close button handler
@@ -144,7 +138,7 @@ class ToastManager {
                 if (toast) {
                     const messageEl = toast.querySelector('.toast-message');
                     if (messageEl) {
-                        messageEl.textContent = this.escapeHtml(newMessage);
+                        messageEl.textContent = newMessage;
                     }
                 }
             },
