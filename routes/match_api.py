@@ -192,8 +192,9 @@ def manual_search():
             'confidence': confidence
         }
 
-        # Update stored matches
-        if row_index is not None:
+        # Update stored matches (not for a preview: the row panel only shows the results
+        # and stores a match once the user picks one, through /match/set-row)
+        if row_index is not None and not data.get('preview'):
             matches = load_matches() or {}
             matches[str(row_index)] = result
             save_matches(matches)
@@ -300,6 +301,52 @@ def delete_match():
     if str_idx in sels:
         del sels[str_idx]
         save_selections(sels)
+
+    return jsonify({'success': True})
+
+
+@match_bp.route('/match/set-row', methods=['POST'])
+def set_row_state():
+    """Replace the stored match and selection of one row as a whole.
+
+    Used by the row panel on the match page: Remove match, Accept suggestion, Use and Undo.
+    ``match`` / ``selection`` set to null remove that row's entry.
+    """
+    data = request.get_json(silent=True) or {}
+    row_index = data.get('row_index')
+    if not isinstance(row_index, int) or isinstance(row_index, bool):
+        return jsonify({'error': 'row_index required'}), 400
+
+    bom_data = load_bom_data()
+    if not bom_data:
+        return jsonify({'error': 'No BOM data loaded'}), 400
+    if row_index < 0 or row_index >= len(bom_data.get('rows', [])):
+        return jsonify({'error': 'Invalid row index'}), 400
+
+    match = data.get('match')
+    selection = data.get('selection')
+    if match is not None and not isinstance(match, dict):
+        return jsonify({'error': 'match must be an object or null'}), 400
+    if selection is not None and not isinstance(selection, dict):
+        return jsonify({'error': 'selection must be an object or null'}), 400
+
+    str_idx = str(row_index)
+
+    matches = load_matches() or {}
+    if match is None:
+        matches.pop(str_idx, None)
+    else:
+        match['row_index'] = row_index
+        matches[str_idx] = match
+    save_matches(matches)
+
+    sels = load_selections() or {}
+    clean_sel = {k: selection[k] for k in ('fabernr', 'mpnfree') if selection and k in selection}
+    if clean_sel:
+        sels[str_idx] = clean_sel
+    else:
+        sels.pop(str_idx, None)
+    save_selections(sels)
 
     return jsonify({'success': True})
 

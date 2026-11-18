@@ -512,6 +512,26 @@ body {
     background: var(--surface-sunken);
 }
 
+/* Optional action in a toast (e.g. Undo on the match page) */
+.toast-action {
+    flex-shrink: 0;
+    height: 24px;
+    margin-left: var(--space-1);
+    padding: 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--link);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.toast-action:hover {
+    background: var(--steel-soft);
+}
+
 .toast-success .toast-icon { background: var(--success); }
 .toast-error .toast-icon { background: var(--danger); }
 .toast-warning .toast-icon { background: var(--warning); }

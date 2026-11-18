@@ -1,8 +1,9 @@
 /**
  * BOM Matcher - Process Page JavaScript
  * One table per BOM line: customer BOM columns, the ERP match and the parameter indicators,
- * with auto-fit zoom, MPN/parameter highlights, full-screen row detail modal,
- * MPNfree selection, Copy/Delete modes and manual search.
+ * with auto-fit zoom, MPN/parameter highlights, MPNfree selection and Copy/Delete modes.
+ * Clicking a line opens a panel directly under it (design mt-01d): the current match with
+ * Remove match / Accept suggestion, the candidates with Use, and a manual ERP search.
  */
 
 let bomData = null;
@@ -10,14 +11,9 @@ let matchResults = {};
 let mpnfreeResults = {};
 let selections = {};
 let selectedRow = null;
-let activeModal = null;
 let copyMode = false;
 let deleteMode = false;
 let deletedRows = new Set();
-let modalSortColumn = null;
-let modalSortAsc = true;
-let modalSuggestions = [];
-let modalRowIndex = null;
 let descColumnWidth = null;
 let statusFilter = 'all';
 
@@ -260,6 +256,10 @@ function fitMatchTable() {
     const keepTop = sheet.scrollTop;
     const keepLeft = sheet.scrollLeft;
 
+    // The open row panel must not take part in the measurement
+    const panelBox = table.querySelector('.xpanel');
+    if (panelBox) panelBox.style.display = 'none';
+
     table.style.zoom = 1;
     table.style.width = 'auto';
     const needed = table.offsetWidth;
@@ -280,8 +280,21 @@ function fitMatchTable() {
         }
         currentTableZoom = z;
     }
+    if (panelBox) panelBox.style.display = '';
+    sizePanel();
     sheet.scrollTop = keepTop;
     sheet.scrollLeft = keepLeft;
+}
+
+/** The open row panel: the visible width of the sheet, sticky left, text back at 100%. */
+function sizePanel() {
+    const sheet = document.getElementById('matchSheet');
+    const box = sheet && sheet.querySelector('.xpanel');
+    if (!box) return;
+    const td = box.closest('td');
+    box.style.zoom = (1 / (currentTableZoom || 1)).toFixed(4);
+    const visible = Math.min(sheet.clientWidth, td.getBoundingClientRect().width);
+    box.style.width = Math.max(600, Math.floor(visible) - 1) + 'px';
 }
 
 let _fitFrame = 0;
@@ -332,37 +345,57 @@ function numCell(value) {
     return `<td class="fx-num fx-mono">${fmtQty(n)}</td>`;
 }
 
-function priceCell(value) {
+/** Kostprijs as '€ 0,0000'; it comes in as 0 when Exact has no cost price, so 0 shows as missing. */
+function priceHtml(value) {
     const n = toNumber(value);
-    // Kostprijs comes in as 0 when Exact has no cost price: show it as missing
-    if (n === null || n === 0) return `<td class="fx-num">${NIL}</td>`;
-    return `<td class="fx-num fx-mono">€ ${_nlPrice.format(n)}</td>`;
+    if (n === null || n === 0) return NIL;
+    return `€ ${_nlPrice.format(n)}`;
+}
+
+function priceCell(value) {
+    const html = priceHtml(value);
+    return html === NIL ? `<td class="fx-num">${NIL}</td>` : `<td class="fx-num fx-mono">${html}</td>`;
+}
+
+/** Voorraad: Dutch notation, a red badge when out of stock. */
+function stockHtml(value) {
+    const n = toNumber(value);
+    if (n === null) return NIL;
+    if (n <= 0) return `<span class="fx-badge fx-badge-danger fx-badge-mono" title="Out of stock">✖ ${fmtQty(n)}</span>`;
+    return fmtQty(n);
 }
 
 function stockCell(value) {
     const n = toNumber(value);
-    if (n === null) return `<td class="fx-num">${NIL}</td>`;
-    if (n <= 0) return `<td class="fx-num"><span class="fx-badge fx-badge-danger fx-badge-mono" title="Out of stock">✖ ${fmtQty(n)}</span></td>`;
-    return `<td class="fx-num fx-mono">${fmtQty(n)}</td>`;
+    const html = stockHtml(value);
+    return (n === null || n <= 0) ? `<td class="fx-num">${html}</td>` : `<td class="fx-num fx-mono">${html}</td>`;
 }
 
 const MOUNTING_TONES = { SMD: 'sky', HAND: 'gold', PHM: 'slate', PCB: 'steel' };
 
-function mountingCell(value) {
-    if (isBlank(value)) return `<td>${NIL}</td>`;
+function mountingBadge(value) {
+    if (isBlank(value)) return NIL;
     const tone = MOUNTING_TONES[String(value).trim().toUpperCase()] || 'neutral';
-    return `<td><span class="fx-badge fx-badge-${tone}">${escapeHtml(value)}</span></td>`;
+    return `<span class="fx-badge fx-badge-${tone}">${escapeHtml(value)}</span>`;
+}
+
+function mountingCell(value) {
+    return `<td>${mountingBadge(value)}</td>`;
+}
+
+function erpStatusBadge(value) {
+    if (isBlank(value)) return NIL;
+    const s = String(value).trim();
+    const lower = s.toLowerCase();
+    if (lower === 'actief') return `<span class="fx-badge fx-badge-success">✓ ${escapeHtml(s)}</span>`;
+    if (lower === 'vervallen' || lower === 'geblokkeerd' || lower === 'blocked') {
+        return `<span class="fx-badge fx-badge-danger">✖ ${escapeHtml(s)}</span>`;
+    }
+    return `<span class="fx-badge fx-badge-neutral">${escapeHtml(s)}</span>`;
 }
 
 function erpStatusCell(value) {
-    if (isBlank(value)) return `<td>${NIL}</td>`;
-    const s = String(value).trim();
-    const lower = s.toLowerCase();
-    if (lower === 'actief') return `<td><span class="fx-badge fx-badge-success">✓ ${escapeHtml(s)}</span></td>`;
-    if (lower === 'vervallen' || lower === 'geblokkeerd' || lower === 'blocked') {
-        return `<td><span class="fx-badge fx-badge-danger">✖ ${escapeHtml(s)}</span></td>`;
-    }
-    return `<td><span class="fx-badge fx-badge-neutral">${escapeHtml(s)}</span></td>`;
+    return `<td>${erpStatusBadge(value)}</td>`;
 }
 
 const SEARCH_METHOD_LABELS = {
@@ -377,8 +410,8 @@ const SEARCH_METHOD_LABELS = {
     error: 'Error',
 };
 
-/** The Status badge per line: ✓ Matched / ⚠ Partial / ✖ No match, Deleted, or — when not matched yet. */
-function rowStatusCell(state) {
+/** The status badge of a line: ✓ Matched / ⚠ Partial / ✖ No match / ✕ Deleted, or '' when not matched yet. */
+function statusBadge(state) {
     const parts = [];
     if (state.sel.fabernr) {
         parts.push('Selected by hand');
@@ -390,16 +423,21 @@ function rowStatusCell(state) {
     const tip = escapeHtml(parts.join(' · '));
     switch (state.status) {
         case 'deleted':
-            return `<td class="pin2"><span class="fx-badge fx-badge-slate row-status" title="Match removed">✕ Deleted</span></td>`;
+            return `<span class="fx-badge fx-badge-slate row-status" title="Match removed">✕ Deleted</span>`;
         case 'matched':
-            return `<td class="pin2"><span class="fx-badge fx-badge-success row-status" title="${tip}">✓ Matched</span></td>`;
+            return `<span class="fx-badge fx-badge-success row-status" title="${tip}">✓ Matched</span>`;
         case 'partial':
-            return `<td class="pin2"><span class="fx-badge fx-badge-warning row-status" title="${tip}">⚠ Partial</span></td>`;
+            return `<span class="fx-badge fx-badge-warning row-status" title="${tip}">⚠ Partial</span>`;
         case 'nomatch':
-            return `<td class="pin2"><span class="fx-badge fx-badge-danger row-status" title="${tip}">✖ No match</span></td>`;
+            return `<span class="fx-badge fx-badge-danger row-status" title="${tip}">✖ No match</span>`;
         default:
-            return `<td class="pin2" title="Not matched yet">${NIL}</td>`;
+            return '';
     }
+}
+
+function rowStatusCell(state) {
+    const badge = statusBadge(state);
+    return badge ? `<td class="pin2">${badge}</td>` : `<td class="pin2" title="Not matched yet">${NIL}</td>`;
 }
 
 // ========================================================================
@@ -615,6 +653,9 @@ function renderTables() {
 
     document.getElementById('matchTableBody').innerHTML = html;
 
+    // The row panel lives inside the table body: put it back under its line
+    if (panel) mountPanel();
+
     // Parameter indicators: inline above; fill them in once the package settings have loaded
     if (!paramsReady && typeof populateMatcherParamsTable === 'function') {
         populateMatcherParamsTable();
@@ -792,44 +833,45 @@ function renderHighlightedDescription(suggestion, match) {
     return escapeHtml(desc);
 }
 
-function renderMpnHighlights(suggestion, match, customerRow, mapping) {
-    const customerMpn = getMappedValue(customerRow, mapping.MPN);
-    const erpMpn = suggestion.MPN || '';
-
-    if (!erpMpn) return '';
-
-    // Check for MPN highlights
-    const highlights = suggestion._mpn_highlights;
-    if (highlights && highlights.length > 0) {
-        const hl = highlights[0];
-        const hlClass = hl.match_type === 'exact' ? 'hl-mpn-exact' : 'hl-mpn-partial';
-        return `<span class="mpn-clickable ${hlClass}" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(erpMpn)}</span>`;
-    }
-
-    return `<span class="mpn-clickable" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(erpMpn)}</span>`;
+function normMpn(s) {
+    return String(s || '').replace(/\s+/g, '').toUpperCase();
 }
 
-function renderScore(suggestion, match) {
-    const score = suggestion._similarity_score;
-    if (score !== undefined && score !== null) {
-        const pct = Math.round(score);
-        const color = pct >= 80 ? 'var(--success)' : pct >= 50 ? 'var(--amber)' : 'var(--danger)';
-        return `<span class="score-bar">
-            <span class="score-bar-fill">
-                <span class="score-bar-fill-inner" style="width: ${pct}%; background: ${color};"></span>
-            </span>
-            ${pct}%
-        </span>`;
-    }
+/**
+ * How the ERP MPN relates to the customer's MPN: 'exact' when it is the same part number
+ * (case and spaces aside, the rule Find IPN uses to assign automatically), 'partial' when one
+ * contains the other or they share most of their start (packaging suffix, -TR), '' otherwise.
+ */
+function mpnMatchType(customerMpn, erpMpn) {
+    const a = normMpn(customerMpn);
+    const b = normMpn(erpMpn);
+    if (!a || !b) return '';
+    if (a === b) return 'exact';
+    const sa = a.replace(/[^A-Z0-9]/g, '');
+    const sb = b.replace(/[^A-Z0-9]/g, '');
+    const shorter = Math.min(sa.length, sb.length);
+    if (shorter < 4) return '';
+    if (sa.includes(sb) || sb.includes(sa)) return 'partial';
+    let common = 0;
+    while (common < shorter && sa[common] === sb[common]) common++;
+    return common >= Math.max(5, Math.ceil(shorter * 0.75)) ? 'partial' : '';
+}
 
-    // For MPN matches, show confidence indicator
-    if (match && match.search_method === 'mpn') {
-        const conf = match.confidence;
-        if (conf === 'high') return '<span style="color: var(--success); font-weight: 600;">Exact</span>';
-        if (conf === 'medium') return '<span style="color: var(--warning);">Partial</span>';
-    }
+const MPN_MATCH_CLASS = { exact: 'hl-mpn-exact', partial: 'hl-mpn-partial' };
+const MPN_MATCH_TIP = { exact: 'Same MPN as the customer BOM', partial: 'MPN differs from the customer BOM' };
 
-    return '';
+/** An ERP MPN, green underlined when it equals the customer's MPN, amber when it only resembles it. */
+function mpnHtml(erpMpn, customerMpn, extraClass) {
+    const type = mpnMatchType(customerMpn, erpMpn);
+    const cls = ['mpn-clickable', extraClass, MPN_MATCH_CLASS[type]].filter(Boolean).join(' ');
+    const tip = (MPN_MATCH_TIP[type] ? MPN_MATCH_TIP[type] + ' · ' : '') + 'Ctrl+Click: Google | Alt+Click: DigiKey';
+    return `<span class="${cls}" title="${escapeHtml(tip)}">${escapeHtml(erpMpn)}</span>`;
+}
+
+function renderMpnHighlights(suggestion, match, customerRow, mapping) {
+    const erpMpn = suggestion.MPN || '';
+    if (!erpMpn) return '';
+    return mpnHtml(erpMpn, getMappedValue(customerRow, mapping.MPN));
 }
 
 function applyHighlights(text, highlights) {
@@ -874,6 +916,9 @@ function setMode(mode) {
         if (label) label.textContent = `${name}: ${on ? 'ON' : 'OFF'}`;
     }
 
+    // In Copy / Delete mode a click does that action, so the row panel closes
+    if (mode) closePanel();
+
     const page = document.querySelector('.match-page');
     if (page) {
         page.classList.toggle('mode-copy', copyMode);
@@ -901,373 +946,513 @@ function toggleDeleteMode() {
     setMode(deleteMode ? null : 'delete');
 }
 
-async function deleteMatch(rowIndex) {
-    const saved = captureScroll();
-    const strIdx = String(rowIndex);
-    delete matchResults[strIdx];
-    delete selections[strIdx];
-    deletedRows.add(rowIndex);
+// ========================================================================
+// Storing one line: Remove match, Accept suggestion, Use, Undo
+// ========================================================================
 
-    try {
-        await apiCall('/api/match/delete', {
-            method: 'POST',
-            body: JSON.stringify({ row_index: rowIndex })
-        });
-        toast.success(`Match removed for row ${rowIndex + 1}`);
-    } catch (e) {
-        // toast shown by apiCall
-    }
+function cloneJson(v) {
+    return v === undefined || v === null ? null : JSON.parse(JSON.stringify(v));
+}
+
+/** Everything needed to put a line back as it was (for Undo). */
+function snapshotRow(rowIndex) {
+    const s = String(rowIndex);
+    return { match: cloneJson(matchResults[s]), sel: cloneJson(selections[s]), deleted: deletedRows.has(rowIndex) };
+}
+
+function applyRowLocal(rowIndex, match, sel, deleted) {
+    const s = String(rowIndex);
+    if (match) matchResults[s] = match; else delete matchResults[s];
+    if (sel && Object.keys(sel).length) selections[s] = sel; else delete selections[s];
+    if (deleted) deletedRows.add(rowIndex); else deletedRows.delete(rowIndex);
+}
+
+/** Set a line's match + selection here and on the server, then re-render. Returns true when stored. */
+async function storeRow(rowIndex, match, sel, deleted) {
+    const before = snapshotRow(rowIndex);
+    const saved = captureScroll();
+    applyRowLocal(rowIndex, match, sel, deleted);
     renderTables();
     restoreScroll(saved);
+    const s = String(rowIndex);
+    try {
+        await apiCall('/api/match/set-row', {
+            method: 'POST',
+            body: JSON.stringify({ row_index: rowIndex, match: matchResults[s] || null, selection: selections[s] || null })
+        });
+        return true;
+    } catch (e) {
+        // toast shown by apiCall; put the line back
+        applyRowLocal(rowIndex, before.match, before.sel, before.deleted);
+        renderTables();
+        restoreScroll(saved);
+        return false;
+    }
+}
+
+// Only the latest action can be undone: an older Undo would overwrite what came after it
+let undoToastId = null;
+
+/** A success toast with an Undo button that restores the snapshot. */
+function notifyWithUndo(message, rowIndex, snap) {
+    if (undoToastId !== null) toast.dismiss(undoToastId);
+    undoToastId = toast.show(message, 'success', 8000, {
+        label: 'Undo',
+        onClick: async () => {
+            if (await storeRow(rowIndex, snap.match, snap.sel, snap.deleted)) {
+                toast.info(`Row ${rowIndex + 1} is back as it was`);
+            }
+        }
+    });
+}
+
+/** The ERP article on the line, or null when it has none (or its match was removed). */
+function currentItem(state) {
+    return state.status === 'deleted' ? null : state.displayItem;
+}
+
+/** Remove the ERP match of a line. The candidates stay, so another one can still be picked. */
+async function deleteMatch(rowIndex) {
+    const state = getRowState(rowIndex);
+    const item = currentItem(state);
+    if (!item && !state.fabernr) {
+        toast.info(`Row ${rowIndex + 1} has no match to remove`);
+        return;
+    }
+    const snap = snapshotRow(rowIndex);
+    const nr = state.fabernr || (item && item.FaberNr) || '';
+    const match = state.match
+        ? Object.assign(cloneJson(state.match), { auto_selected: null, display_suggestion: null, confidence: 'none' })
+        : null;
+    const sel = Object.assign({}, state.sel);
+    delete sel.fabernr;
+    if (await storeRow(rowIndex, match, sel, true)) {
+        notifyWithUndo(`Match removed for row ${rowIndex + 1}${nr ? ` (${nr})` : ''}`, rowIndex, snap);
+    }
+}
+
+/** Assign an ERP article to a line; it is added to the line's candidates when it came from a search. */
+async function useItem(rowIndex, item, how) {
+    if (!item || isBlank(item.FaberNr)) return;
+    const state = getRowState(rowIndex);
+    const snap = snapshotRow(rowIndex);
+    const match = cloneJson(state.match) ||
+        { row_index: rowIndex, search_method: 'manual', suggestions: [], auto_selected: null, confidence: 'none' };
+    const list = Array.isArray(match.suggestions) ? match.suggestions : [];
+    if (!list.some(s => s.FaberNr === item.FaberNr)) list.unshift(cloneJson(item));
+    match.suggestions = list;
+    const sel = Object.assign({}, state.sel, { fabernr: item.FaberNr });
+    if (await storeRow(rowIndex, match, sel, false)) {
+        notifyWithUndo(`Row ${rowIndex + 1} now uses ${item.FaberNr}${how ? ` · ${how}` : ''}`, rowIndex, snap);
+    }
 }
 
 // ========================================================================
-// Row Selection — Full-Screen Modal
+// Row selection and the row panel: click a line, a panel opens directly under it
 // ========================================================================
+
+// The open panel: { row, view: 'cands' | 'results', sort, results, shown, q, qmode, busy, failed, smode, input }
+let panel = null;
+
+const PANEL_ICON_PATHS = {
+    check: '<path d="M3 8.5l3 3 7-7"/>',
+    trash: '<path d="M2.5 4h11"/><path d="M6 4V2.5h4V4"/><path d="M3.75 4l.75 9.5h7l.75-9.5"/>',
+    close: '<path d="M4 4l8 8"/><path d="M12 4l-8 8"/>',
+    back: '<path d="M13 8H3"/><path d="M7 4L3 8l4 4"/>',
+    search: '<circle cx="7" cy="7" r="4.75"/><path d="M10.5 10.5L14 14"/>',
+};
+
+function panelIcon(name) {
+    return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" ' +
+        `stroke-linejoin="round" aria-hidden="true">${PANEL_ICON_PATHS[name]}</svg>`;
+}
+
+const SEARCH_MODES = [['mpn', 'MPN'], ['ipn', 'IPN'], ['description', 'Description']];
+const SEARCH_MODE_LABELS = { mpn: 'MPN', ipn: 'IPN', description: 'Description' };
+const PANEL_SORTS = [['rank', 'Ranking'], ['score', 'Score'], ['cost', 'Kostprijs'], ['stock', 'Voorraad']];
+const PARAM_NAMES = ['Value', 'Tolerance', 'Voltage', 'Power', 'Package'];
+
+function rowEl(rowIndex) {
+    return document.querySelector(`#matchTableBody tr[data-row="${rowIndex}"]`);
+}
+
+function panelRowEl() {
+    return document.querySelector('#matchTableBody tr.xrow');
+}
 
 function selectRow(rowIndex) {
     selectedRow = rowIndex;
     document.querySelectorAll('#matchTableBody tr[aria-selected="true"]').forEach(tr => tr.removeAttribute('aria-selected'));
-    const tr = document.querySelector(`#matchTableBody tr[data-row="${rowIndex}"]`);
+    const tr = rowEl(rowIndex);
     if (tr) tr.setAttribute('aria-selected', 'true');
     saveUiState();
 }
 
-function openSelectedRowModal() {
-    if (selectedRow !== null) {
-        showRowDetailModal(selectedRow);
-    }
+/** Keep a line (and its open panel) in view inside the sheet, below the sticky header. */
+function revealRow(rowIndex) {
+    const sheet = document.getElementById('matchSheet');
+    const tr = rowEl(rowIndex);
+    if (!sheet || !tr) return;
+    const below = (panel && panel.row === rowIndex && panelRowEl()) || tr;
+    const box = sheet.getBoundingClientRect();
+    const headH = document.getElementById('matchTableHead').getBoundingClientRect().height;
+    const top = tr.getBoundingClientRect().top;
+    const bottom = below.getBoundingClientRect().bottom;
+    const minTop = box.top + sheet.clientTop + headH;
+    const maxBottom = box.top + sheet.clientTop + sheet.clientHeight;
+    if (top < minTop) sheet.scrollTop -= (minTop - top);
+    else if (bottom > maxBottom) sheet.scrollTop += Math.min(bottom - maxBottom + 6, top - minTop);
 }
 
 function scrollSelectedRowIntoView() {
-    if (selectedRow === null) return;
-    const tr = document.querySelector(`#matchTableBody tr[data-row="${selectedRow}"]`);
-    if (tr) {
-        tr.scrollIntoView({ block: 'nearest' });
-    }
+    if (selectedRow !== null) revealRow(selectedRow);
 }
 
-function showRowDetailModal(rowIndex) {
-    if (!bomData) return;
-    modalSortColumn = null;
-    modalSortAsc = true;
+function togglePanel(rowIndex) {
+    if (panel && panel.row === rowIndex) closePanel();
+    else openPanel(rowIndex);
+}
 
-    const mapping = bomData.column_mapping || {};
-    const rows = bomData.rows || [];
-    const row = rows[rowIndex];
-    if (!row) return;
-
-    const strIdx = String(rowIndex);
-    const match = matchResults[strIdx];
-    const suggestions = (match && match.suggestions) ? match.suggestions : [];
-    const hasMpnfree = previousBomMode() || Object.keys(mpnfreeResults).length > 0;
-
-    // Build left side: customer BOM details
-    const mappedCols = getMappedColumns();
-
-    let leftHtml = '';
-    for (const col of mappedCols) {
-        const val = getMappedValue(row, col.actual);
-        const isClickable = col.std === 'Description' || col.std === 'MPN';
-        const extraClass = isClickable ? ' left-field-clickable' : '';
-        const clickAttr = isClickable
-            ? ` data-field-type="${col.std === 'MPN' ? 'mpn' : 'description'}" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;" title="Click to copy to search box${col.std === 'MPN' ? ' | Ctrl+click: Google | Alt+click: DigiKey' : ''}"`
-            : '';
-        leftHtml += `<div class="row-detail-field">
-            <div class="row-detail-field-label">${escapeHtml(col.std)}</div>
-            <div class="row-detail-field-value${extraClass}"${clickAttr}>${escapeHtml(val)}</div>
-        </div>`;
-    }
-
-    // MPNfree dropdown in modal
-    if (hasMpnfree) {
-        const mpnfreeVal = getMpnfreeValue(rowIndex);
-        leftHtml += `<div class="row-detail-field">
-            <div class="row-detail-field-label">MPNfree</div>
-            <div class="row-detail-field-value">
-                <select class="mpnfree-dropdown ${mpnfreeVal ? 'mpnfree-yes' : 'mpnfree-no'}"
-                        onchange="overrideMpnfreeFromModal(${rowIndex}, this.value === 'yes')">
-                    <option value="no" ${!mpnfreeVal ? 'selected' : ''}>No</option>
-                    <option value="yes" ${mpnfreeVal ? 'selected' : ''}>Yes</option>
-                </select>
-            </div>
-        </div>`;
-    }
-
-    // Match info
-    if (match) {
-        const sel = selections[strIdx] || {};
-        const fabernr = sel.fabernr || (match.auto_selected ? match.auto_selected.FaberNr : '');
-        if (fabernr) {
-            leftHtml += `<div class="row-detail-field">
-                <div class="row-detail-field-label">Assigned IPN</div>
-                <div class="row-detail-field-value" style="font-family: var(--font-family-mono); color: var(--color-primary); font-weight: 600;">${escapeHtml(fabernr)}</div>
-            </div>`;
-        }
-        leftHtml += `<div class="row-detail-field">
-            <div class="row-detail-field-label">Search Method</div>
-            <div class="row-detail-field-value">${escapeHtml(match.search_method || 'none')} (${escapeHtml(match.confidence || 'none')})</div>
-        </div>`;
-    }
-
-    // Build right side: alternatives table
-    const altTableHtml = buildAlternativesTable(suggestions, rowIndex);
-
-    // Build modal content
-    const bodyHtml = `
-        <div class="row-detail-left">${leftHtml}</div>
-        <div class="row-detail-right">
-            <div class="row-detail-header">ERP Matches (${suggestions.length} results)</div>
-            <div class="row-detail-alternatives" id="modalAltBody">
-                ${altTableHtml}
-            </div>
-            <div class="row-detail-search">
-                <select class="form-select" id="modalSearchType">
-                    <option value="mpn">MPN</option>
-                    <option value="ipn">IPN</option>
-                    <option value="description" selected>Description</option>
-                </select>
-                <input type="text" class="form-input" id="modalSearchQuery" placeholder="Search query..."
-                       onkeydown="if(event.key==='Enter') manualSearch(${rowIndex})">
-                <button class="btn btn-primary btn-sm" onclick="manualSearch(${rowIndex})">Search</button>
-            </div>
-        </div>
-    `;
-
-    // Create modal using ModalManager pattern but with fullscreen size
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-
-    const modalEl = document.createElement('div');
-    modalEl.className = 'modal modal-fullscreen';
-
-    modalEl.innerHTML = `
-        <div class="modal-header" style="display: flex; align-items: center; gap: 12px;">
-            <button class="btn btn-outline btn-sm" onclick="closeRowDetailModal()">Close</button>
-            <h3 class="modal-title">Row ${rowIndex + 1} Details</h3>
-        </div>
-        <div class="modal-body">${bodyHtml}</div>
-    `;
-
-    // MPN click handler: Click=Copy, Ctrl+Click=Google, Alt+Click=DigiKey
-    modalEl.addEventListener('click', function(e) {
-        if (e.target.classList.contains('mpn-clickable')) {
-            const mpn = e.target.innerText.trim();
-            if (!mpn) return;
-
-            if (e.ctrlKey || e.metaKey) {
-                e.preventDefault();
-                window.open(`https://www.google.com/search?q=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
-            } else if (e.altKey) {
-                e.preventDefault();
-                window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
-            } else {
-                navigator.clipboard.writeText(mpn).catch(() => {});
-            }
-        }
-        // Left panel field click handler
-        if (e.target.classList.contains('left-field-clickable')) {
-            const val = e.target.textContent.trim();
-            if (!val) return;
-            const fieldType = e.target.dataset.fieldType;
-
-            if (fieldType === 'mpn' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                window.open(`https://www.google.com/search?q=${encodeURIComponent(val)}`, '_blank', 'noopener,noreferrer');
-            } else if (fieldType === 'mpn' && e.altKey) {
-                e.preventDefault();
-                window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(val)}`, '_blank', 'noopener,noreferrer');
-            } else {
-                document.getElementById('modalSearchQuery').value = val;
-                document.getElementById('modalSearchType').value = fieldType;
-            }
-        }
-    });
-
-    overlay.appendChild(modalEl);
-
-    // Close on backdrop click
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeRowDetailModal();
-    });
-
-    document.body.appendChild(overlay);
-    document.body.style.overflow = 'hidden';
-
-    // Show with animation
-    requestAnimationFrame(() => overlay.classList.add('show'));
-
-    activeModal = overlay;
-
-    // Escape key handler
-    const escHandler = (e) => {
-        if (e.key === 'Escape') {
-            closeRowDetailModal();
-            document.removeEventListener('keydown', escHandler);
-        }
+function openPanel(rowIndex) {
+    const tr = rowEl(rowIndex);
+    if (!tr || tr.hidden) return;
+    selectRow(rowIndex);
+    panel = {
+        row: rowIndex, view: 'cands', sort: 'rank', results: [], shown: [],
+        q: '', qmode: '', busy: false, failed: false, smode: null, input: null,
     };
-    document.addEventListener('keydown', escHandler);
-
-    // Focus search input
-    setTimeout(() => {
-        const input = document.getElementById('modalSearchQuery');
-        if (input) input.focus();
-    }, 200);
+    mountPanel();
+    fitMatchTable();
+    revealRow(rowIndex);
 }
 
-const modalColumns = [
-    { key: 'FaberNr', label: 'FaberNr' },
-    { key: 'Omschrijving', label: 'Omschrijving' },
-    { key: 'Manufacturer', label: 'Manufacturer' },
-    { key: 'MPN', label: 'MPN' },
-    { key: 'KlantNaam', label: 'KlantNaam' },
-    { key: 'Mounting', label: 'Mounting' },
-    { key: 'Status', label: 'Status' },
-    { key: 'Kostprijs', label: 'Kostprijs', numeric: true },
-    { key: 'Voorraad', label: 'Voorraad', numeric: true },
-    { key: 'Verbruik', label: 'Verbruik', numeric: true },
-    { key: 'InBestelling', label: 'InBestelling', numeric: true },
-    { key: 'KlantNr', label: 'KlantNr' },
-    { key: 'Type', label: 'Type' },
-];
+function closePanel(silent) {
+    if (!panel) return;
+    unmountPanel();
+    panel = null;
+    if (!silent) fitMatchTable();
+}
 
-function sortModalTable(columnKey) {
-    if (modalSortColumn === columnKey) {
-        modalSortAsc = !modalSortAsc;
+function unmountPanel() {
+    document.querySelectorAll('#matchTableBody tr.xrow').forEach(x => x.remove());
+    document.querySelectorAll('#matchTableBody tr.is-open').forEach(tr => {
+        tr.classList.remove('is-open');
+        tr.removeAttribute('aria-expanded');
+    });
+}
+
+/** Insert the panel row under its line (also after every renderTables) and fill it. */
+function mountPanel() {
+    unmountPanel();
+    if (!panel) return;
+    const tr = rowEl(panel.row);
+    if (!tr || tr.hidden) { panel = null; return; }
+    const x = document.createElement('tr');
+    x.className = 'xrow';
+    x.innerHTML = `<td colspan="${tr.children.length}"><div class="xwrap">` +
+        `<div class="xpanel" role="region" aria-label="Row ${panel.row + 1}: current match, candidates and search">` +
+        '<section class="xcur" aria-label="Current match"></section>' +
+        '<section class="xright"><div class="xhead"></div>' +
+        '<div class="xmini"><div class="xmini-scroll"></div></div>' +
+        '<div class="xsearch"></div></section>' +
+        '</div></div></td>';
+    tr.after(x);
+    tr.classList.add('is-open');
+    tr.setAttribute('aria-expanded', 'true');
+    renderPanel();
+}
+
+function renderPanel() {
+    const x = panelRowEl();
+    if (!x || !panel) return;
+    x.querySelector('.xcur').innerHTML = panelCurrentHtml(panel.row);
+    x.querySelector('.xhead').innerHTML = panelHeadHtml(panel.row);
+    x.querySelector('.xmini-scroll').innerHTML = panelListHtml(panel.row);
+    x.querySelector('.xsearch').innerHTML = panelSearchHtml(panel.row);
+}
+
+/** Up to two notes from the parameter indicators of the line: what differs, or that all checks match. */
+function paramNotes(rowIndex) {
+    const tr = rowEl(rowIndex);
+    if (!tr) return '';
+    const out = [];
+    let checked = false;
+    tr.querySelectorAll('td.pc').forEach((td, k) => {
+        const ind = td.querySelector('.param-indicator');
+        if (!ind) return;
+        if (!ind.classList.contains('param-na') && !ind.classList.contains('param-missing')) checked = true;
+        const tip = escapeHtml(String(ind.dataset.tip || ind.title || '').replace(' | ', ', '));
+        const name = PARAM_NAMES[k] || 'Parameter';
+        if (ind.classList.contains('param-diff')) {
+            out.push(`<div class="xnote is-bad" title="${tip}">✖ ${name} differs · ${tip}</div>`);
+        } else if (ind.classList.contains('param-acceptable')) {
+            out.push(`<div class="xnote is-warn" title="${tip}">⚠ ${name} · ${tip}</div>`);
+        }
+    });
+    if (!out.length) {
+        out.push(checked
+            ? '<div class="xnote is-ok">✓ Checked parameters match</div>'
+            : '<div class="xnote">No parameters checked for this line</div>');
+    }
+    return out.slice(0, 2).join('');
+}
+
+function panelCurrentHtml(rowIndex) {
+    const state = getRowState(rowIndex);
+    const item = currentItem(state);
+    const n = rowIndex + 1;
+    let h = `<div class="xcur-top"><span class="xlabel">Current match</span>${statusBadge(state)}</div>`;
+
+    if (item) {
+        const isSugg = !state.fabernr;
+        const nr = state.fabernr || item.FaberNr || '';
+        const nrHtml = isSugg
+            ? `<span class="sugg">${escapeHtml(nr)}</span><span class="fx-badge fx-badge-steel">Suggestion</span>`
+            : `<span class="fnr">${escapeHtml(nr)}</span>${renderPreviousBomCheck(nr)}`;
+        const meta = [item.Manufacturer, item.MPN].filter(v => !isBlank(v));
+        h += `<div class="xcur-nr">${nrHtml}${isBlank(item.Mounting) ? '' : mountingBadge(item.Mounting)}</div>` +
+            `<div class="xcur-oms" title="${escapeHtml(item.Omschrijving || '')}">${escapeHtml(item.Omschrijving || '—')}</div>` +
+            (meta.length ? `<div class="xcur-meta">${escapeHtml(item.Manufacturer || '—')} · <span class="fx-mono">${escapeHtml(item.MPN || '—')}</span></div>` : '') +
+            `<div class="xfacts"><span>Kostprijs<b>${priceHtml(item.Kostprijs)}</b></span><span>Voorraad<b>${stockHtml(item.Voorraad)}</b></span></div>` +
+            paramNotes(rowIndex);
+    } else if (state.fabernr) {
+        h += `<div class="xcur-nr"><span class="fnr">${escapeHtml(state.fabernr)}</span>${renderPreviousBomCheck(state.fabernr)}</div>` +
+            '<div class="xnone-text">Assigned by hand; the article details are not loaded.</div>';
     } else {
-        modalSortColumn = columnKey;
-        modalSortAsc = true;
+        let title = 'Not matched yet';
+        let text = 'Run Find IPN, or search the ERP by MPN, IPN or description below.';
+        if (state.status === 'deleted') {
+            title = 'Match removed';
+            text = `Row ${n} has no ERP article now. Use a candidate or search the ERP by MPN, IPN or description.`;
+        } else if (state.match) {
+            title = 'No match';
+            text = `Row ${n} has no ERP article. Use a candidate or search the ERP by MPN, IPN or description.`;
+        }
+        h += `<div class="xnone"><span class="xnone-title">${title}</span><span class="xnone-text">${text}</span></div>`;
     }
-    const altBody = document.getElementById('modalAltBody');
-    if (altBody) {
-        altBody.innerHTML = buildAlternativesTable(modalSuggestions, modalRowIndex);
-    }
+
+    const canRemove = !!(item || state.fabernr);
+    // A suggestion, or a partial match Find IPN assigned itself, can be confirmed (it becomes Matched)
+    let acceptLabel = '';
+    if (item && !state.fabernr) acceptLabel = 'Accept suggestion';
+    else if (item && !state.sel.fabernr && state.status === 'partial') acceptLabel = 'Accept match';
+    h += '<div class="xcur-act">' +
+        (acceptLabel ? `<button type="button" class="btn btn-primary" data-act="accept">${panelIcon('check')}${acceptLabel}</button>` : '') +
+        `<button type="button" class="btn btn-danger" data-act="remove"${canRemove ? '' : ' disabled title="This line has no match"'}>${panelIcon('trash')}Remove match</button>` +
+        '</div>';
+    return h;
 }
 
-function buildAlternativesTable(suggestions, rowIndex) {
-    if (!suggestions || suggestions.length === 0) {
-        return '<div style="padding: 24px; text-align: center; color: var(--text-muted);">No matches found. Use manual search below.</div>';
-    }
-
-    // Store for sorting
-    modalSuggestions = suggestions;
-    modalRowIndex = rowIndex;
-
-    // Sort if a column is selected
-    let sorted = [...suggestions];
-    if (modalSortColumn) {
-        const colDef = modalColumns.find(c => c.key === modalSortColumn);
-        const isNumeric = colDef && colDef.numeric;
-        sorted.sort((a, b) => {
-            let va = a[modalSortColumn] || '';
-            let vb = b[modalSortColumn] || '';
-            if (isNumeric) {
-                va = parseFloat(va) || 0;
-                vb = parseFloat(vb) || 0;
-                return modalSortAsc ? va - vb : vb - va;
-            }
-            va = String(va).toLowerCase();
-            vb = String(vb).toLowerCase();
-            if (va < vb) return modalSortAsc ? -1 : 1;
-            if (va > vb) return modalSortAsc ? 1 : -1;
-            return 0;
-        });
-    }
-
-    let html = '<table class="data-table"><thead><tr>';
-    for (const col of modalColumns) {
-        const arrow = modalSortColumn === col.key ? (modalSortAsc ? ' ▲' : ' ▼') : '';
-        html += `<th style="cursor:pointer; user-select:none;" onclick="sortModalTable('${col.key}')">${col.label}${arrow}</th>`;
-    }
-    html += '<th></th></tr></thead><tbody>';
-
-    for (const s of sorted) {
-        const descHtml = s._param_highlights && s._param_highlights.length > 0
-            ? applyHighlights(s.Omschrijving || '', s._param_highlights)
-            : escapeHtml(s.Omschrijving || '');
-        const fabernr = escapeHtml(s.FaberNr || '');
-
-        html += `<tr>
-            <td><strong>${fabernr}</strong>${renderPreviousBomCheck(s.FaberNr || '')}</td>
-            <td title="${escapeHtml(s.Omschrijving || '')}">${descHtml}</td>
-            <td>${escapeHtml(s.Manufacturer || '')}</td>
-            <td><span class="mpn-clickable" title="Click: Copy | Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(s.MPN || '')}</span></td>
-            <td>${escapeHtml(s.KlantNaam || '')}</td>
-            <td>${escapeHtml(s.Mounting || '')}</td>
-            <td>${escapeHtml(s.Status || '')}</td>
-            <td>${s.Kostprijs || 0}</td>
-            <td>${s.Voorraad || 0}</td>
-            <td>${s.Verbruik || 0}</td>
-            <td>${s.InBestelling || 0}</td>
-            <td>${escapeHtml(s.KlantNr || '')}</td>
-            <td>${escapeHtml(s.Type || '')}</td>
-            <td><button class="btn btn-primary btn-sm" onclick="selectFromModal(${rowIndex}, '${fabernr}')">Select</button></td>
-        </tr>`;
-    }
-
-    html += '</tbody></table>';
-    return html;
+/** The line's candidates in Find IPN order, with the shown article first when it is not among them. */
+function panelCandidates(rowIndex) {
+    const state = getRowState(rowIndex);
+    const list = (state.match && Array.isArray(state.match.suggestions)) ? state.match.suggestions.slice() : [];
+    const item = currentItem(state);
+    if (item && !isBlank(item.FaberNr) && !list.some(s => s.FaberNr === item.FaberNr)) list.unshift(item);
+    return list;
 }
 
-function closeRowDetailModal() {
-    if (activeModal) {
-        activeModal.classList.remove('show');
-        setTimeout(() => {
-            if (activeModal && activeModal.parentNode) {
-                activeModal.parentNode.removeChild(activeModal);
-            }
-            activeModal = null;
-            document.body.style.overflow = '';
-        }, 200);
+function sortCandidates(list, key) {
+    if (key === 'rank') return list.slice();
+    const value = (s) => {
+        if (key === 'score') { const v = toNumber(s._similarity_score); return v === null ? -Infinity : -v; }
+        if (key === 'cost') { const v = toNumber(s.Kostprijs); return v ? v : Infinity; }
+        const v = toNumber(s.Voorraad); return v === null ? Infinity : -v;  // stock: most first
+    };
+    return list.map((s, k) => ({ s, k, v: value(s) }))
+        .sort((a, b) => (a.v === b.v ? a.k - b.k : (a.v < b.v ? -1 : 1)))
+        .map(x => x.s);
+}
+
+function panelHeadHtml(rowIndex) {
+    let h;
+    if (panel.view === 'results') {
+        h = `<span class="xtitle">${panel.busy ? 'Searching...' : 'Search results'}</span>` +
+            (panel.busy ? '' : `<span class="fx-badge fx-badge-neutral fx-badge-mono">${panel.results.length}</span>`) +
+            `<span class="xrule">${escapeHtml(SEARCH_MODE_LABELS[panel.qmode] || '')} · “${escapeHtml(panel.q)}”</span><span class="xgrow"></span>` +
+            `<button type="button" class="btn btn-ghost xsmall" data-act="back">${panelIcon('back')}Back to candidates</button>`;
+    } else {
+        const count = panelCandidates(rowIndex).length;
+        h = `<span class="xtitle">Candidates for row ${rowIndex + 1}</span><span class="fx-badge fx-badge-neutral fx-badge-mono">${count}</span>` +
+            (count > 1 ? '<span class="xrule">Ranking as found by Find IPN</span>' : '') + '<span class="xgrow"></span>';
+        if (count > 1) {
+            h += '<div class="xseg" role="group" aria-label="Sort candidates">' + PANEL_SORTS.map(([key, label]) =>
+                `<button type="button" data-act="sort" data-sort="${key}" aria-pressed="${panel.sort === key}">${label}</button>`
+            ).join('') + '</div>';
+        }
     }
+    h += `<button type="button" class="btn btn-ghost xsmall xclose" data-act="close" title="Close (Esc)">${panelIcon('close')}Close</button>`;
+    return h;
 }
 
-function selectFromModal(rowIndex, fabernr) {
-    overrideFabernr(rowIndex, fabernr);
-    closeRowDetailModal();
+function scoreHtml(s) {
+    const v = toNumber(s._similarity_score);
+    if (v === null) return NIL;
+    const pct = Math.max(0, Math.min(100, Math.round(v)));
+    return `<span class="xscore"><span class="xscore-bar"><i style="width:${pct}%"></i></span><span class="xscore-pct">${pct}%</span></span>`;
 }
 
-async function overrideMpnfreeFromModal(rowIndex, value) {
-    await overrideMpnfree(rowIndex, value);
+const PANEL_LIST_HEAD = '<thead><tr><th>FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>Mounting</th>' +
+    '<th>Status</th><th class="fx-num">Kostprijs</th><th class="fx-num">Voorraad</th><th>Score</th>' +
+    '<th class="xact"><span class="xsr">Action</span></th></tr></thead>';
+const PANEL_LIST_COLS = 10;
+
+function panelListHtml(rowIndex) {
+    const message = (text) => `<table>${PANEL_LIST_HEAD}<tbody><tr class="xmsg"><td colspan="${PANEL_LIST_COLS}">${text}</td></tr></tbody></table>`;
+    if (panel.view === 'results' && panel.busy) {
+        return message(`Searching the ERP by ${escapeHtml(SEARCH_MODE_LABELS[panel.qmode] || '')} for “${escapeHtml(panel.q)}”...`);
+    }
+    const state = getRowState(rowIndex);
+    const list = panel.view === 'results' ? panel.results : sortCandidates(panelCandidates(rowIndex), panel.sort);
+    panel.shown = list;
+    if (!list.length) {
+        if (panel.view === 'results') {
+            return message(panel.failed ? 'The search failed. Try again.' : 'No ERP articles found. Try another MPN, IPN or description.');
+        }
+        return message('No candidates for this line. Search the ERP below by MPN, IPN or description.');
+    }
+
+    const item = currentItem(state);
+    const curNr = state.fabernr || (item && item.FaberNr) || '';
+    const curIsSugg = !state.fabernr;
+    const customerMpn = customerSearchValue(rowIndex, 'mpn');
+    let body = '';
+    list.forEach((s, k) => {
+        const isCur = !!curNr && s.FaberNr === curNr;
+        const act = !isCur
+            ? `<button type="button" class="btn xuse" data-act="use" data-k="${k}">Use</button>`
+            : (curIsSugg ? '<span class="fx-badge fx-badge-steel">Suggestion</span>' : '<span class="fx-badge fx-badge-success">✓ In use</span>');
+        const oms = s.Omschrijving || '';
+        const omsHtml = s._param_highlights && s._param_highlights.length ? applyHighlights(oms, s._param_highlights) : escapeHtml(oms);
+        const cls = isCur ? ` class="is-cur${curIsSugg ? ' is-sugg' : ''}"` : '';
+        const stockN = toNumber(s.Voorraad);
+        body += `<tr${cls}>` +
+            `<td><span class="fnr">${escapeHtml(s.FaberNr || '')}</span>${renderPreviousBomCheck(s.FaberNr || '')}</td>` +
+            `<td>${oms ? `<span class="xclip" title="${escapeHtml(oms)}">${omsHtml}</span>` : NIL}</td>` +
+            `<td>${isBlank(s.Manufacturer) ? NIL : `<span class="xclip xclip-m" title="${escapeHtml(s.Manufacturer)}">${escapeHtml(s.Manufacturer)}</span>`}</td>` +
+            `<td class="fx-mono">${isBlank(s.MPN) ? NIL : mpnHtml(s.MPN, customerMpn, 'xclip xclip-l')}</td>` +
+            `<td>${mountingBadge(s.Mounting)}</td>` +
+            `<td>${erpStatusBadge(s.Status)}</td>` +
+            `<td class="fx-num fx-mono">${priceHtml(s.Kostprijs)}</td>` +
+            `<td class="fx-num${stockN !== null && stockN > 0 ? ' fx-mono' : ''}">${stockHtml(s.Voorraad)}</td>` +
+            `<td>${scoreHtml(s)}</td>` +
+            `<td class="xact">${act}</td></tr>`;
+    });
+    return `<table>${PANEL_LIST_HEAD}<tbody>${body}</tbody></table>`;
 }
 
-// ========================================================================
-// Manual Search
-// ========================================================================
+/** The customer's value to search on: MPN, Description, or the line's current FaberNr for IPN. */
+function customerSearchValue(rowIndex, mode) {
+    const row = (bomData && bomData.rows && bomData.rows[rowIndex]) || {};
+    const mapping = (bomData && bomData.column_mapping) || {};
+    if (mode === 'mpn') return getMappedValue(row, mapping.MPN).trim();
+    if (mode === 'ipn') {
+        const state = getRowState(rowIndex);
+        const item = currentItem(state);
+        return state.fabernr || (item && item.FaberNr) || '';
+    }
+    return getMappedValue(row, mapping.Description).trim();
+}
 
-async function manualSearch(rowIndex) {
-    const searchType = document.getElementById('modalSearchType').value;
-    const query = document.getElementById('modalSearchQuery').value.trim();
+function panelSearchHtml(rowIndex) {
+    if (!panel.smode) panel.smode = customerSearchValue(rowIndex, 'mpn') ? 'mpn' : 'description';
+    if (panel.input === null) panel.input = customerSearchValue(rowIndex, panel.smode);
+    const seg = SEARCH_MODES.map(([key, label]) =>
+        `<button type="button" data-act="smode" data-mode="${key}" aria-pressed="${panel.smode === key}">${label}</button>`
+    ).join('');
+    return '<span class="xlabel">Search ERP</span>' +
+        `<div class="xseg" role="group" aria-label="Search by">${seg}</div>` +
+        `<label class="xfield">${panelIcon('search')}` +
+        `<input type="text" class="xq" value="${escapeHtml(panel.input)}" aria-label="Search the ERP" autocomplete="off" spellcheck="false"></label>` +
+        `<button type="button" class="btn xgo" data-act="search"${panel.busy ? ' disabled' : ''}>${panelIcon('search')}${panel.busy ? 'Searching...' : 'Search'}</button>`;
+}
+
+/** Manual ERP search from the panel. A preview only: the line changes once a result is used. */
+async function runPanelSearch() {
+    if (!panel || panel.busy) return;
+    const p = panel;
+    const query = String(p.input || '').trim();
     if (!query) {
-        toast.warning('Please enter a search query');
+        toast.warning('Type an MPN, IPN or description first');
+        const input = panelRowEl() && panelRowEl().querySelector('.xq');
+        if (input) input.focus();
         return;
     }
-
-    const altBody = document.getElementById('modalAltBody');
-    altBody.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-muted);">Searching...</div>';
-
+    Object.assign(p, { view: 'results', q: query, qmode: p.smode, results: [], busy: true, failed: false });
+    renderPanel();
     try {
         const data = await apiCall('/api/match/manual-search', {
             method: 'POST',
-            body: JSON.stringify({ row_index: rowIndex, search_type: searchType, query: query })
+            body: JSON.stringify({ row_index: p.row, search_type: p.smode, query: query, preview: true })
         });
-
-        const suggestions = data.suggestions || [];
-
-        // Update stored match results
-        if (data.result) {
-            matchResults[String(rowIndex)] = data.result;
-        }
-
-        altBody.innerHTML = buildAlternativesTable(suggestions, rowIndex);
-
-        if (suggestions.length === 0) {
-            toast.info('No results found');
-        } else {
-            toast.success(`Found ${suggestions.length} results`);
-        }
+        p.results = data.suggestions || [];
     } catch (e) {
-        altBody.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--color-danger);">Search failed</div>';
+        p.results = [];
+        p.failed = true;
+    }
+    p.busy = false;
+    if (panel === p) renderPanel();  // the panel may have closed or moved meanwhile
+}
+
+function copyText(text) {
+    const t = String(text || '').trim();
+    if (!t) return;
+    navigator.clipboard.writeText(t)
+        .then(() => toast.success(`Copied: ${t.substring(0, 50)}`))
+        .catch(() => {});
+}
+
+/** Clicks inside the open panel (buttons carry data-act). */
+function onPanelClick(e) {
+    if (!panel) return;
+    const btn = e.target.closest('[data-act]');
+    if (!btn) {
+        const mpn = e.target.closest('.mpn-clickable');
+        if (mpn) copyText(mpn.textContent);
+        return;
+    }
+    if (btn.disabled) return;
+    const rowIndex = panel.row;
+    switch (btn.dataset.act) {
+        case 'close':
+            closePanel();
+            break;
+        case 'remove':
+            deleteMatch(rowIndex);
+            break;
+        case 'accept':
+            useItem(rowIndex, currentItem(getRowState(rowIndex)), getRowState(rowIndex).fabernr ? 'match accepted' : 'suggestion accepted');
+            break;
+        case 'use': {
+            const item = (panel.shown || [])[parseInt(btn.dataset.k, 10)];
+            const how = panel.view === 'results'
+                ? `from the ${SEARCH_MODE_LABELS[panel.qmode] || ''} search`
+                : 'from the candidates';
+            // Back to the candidates: the chosen article is now among them, marked as in use
+            panel.view = 'cands';
+            useItem(rowIndex, item, how);
+            break;
+        }
+        case 'sort':
+            panel.sort = btn.dataset.sort;
+            renderPanel();
+            break;
+        case 'smode': {
+            panel.smode = btn.dataset.mode;
+            panel.input = customerSearchValue(rowIndex, panel.smode);
+            renderPanel();
+            const input = panelRowEl().querySelector('.xq');
+            input.focus();
+            input.select();
+            break;
+        }
+        case 'search':
+            runPanelSearch();
+            break;
+        case 'back':
+            panel.view = 'cands';
+            renderPanel();
+            break;
     }
 }
 
@@ -1301,6 +1486,11 @@ function filterTable() {
         tr.hidden = !show;
         if (show) any = true;
     });
+    // A filtered-out line takes its open panel with it
+    if (panel) {
+        const open = rowEl(panel.row);
+        if (!open || open.hidden) closePanel(true);
+    }
     const empty = tbody.querySelector('.empty-row');
     if (empty) empty.hidden = any || total === 0;
 
@@ -1336,6 +1526,8 @@ async function findIpn() {
             for (const r of data.results) {
                 matchResults[String(r.row_index)] = r;
             }
+            // A new match run: lines are no longer marked as removed
+            deletedRows.clear();
         }
         renderTables();
         restoreScroll(saved);
@@ -1349,30 +1541,6 @@ async function findIpn() {
         // toast shown
     } finally {
         hideLoading();
-    }
-}
-
-// ========================================================================
-// Overrides
-// ========================================================================
-
-async function overrideFabernr(rowIndex, value) {
-    const saved = captureScroll();
-    const strIdx = String(rowIndex);
-    if (!selections[strIdx]) selections[strIdx] = {};
-    selections[strIdx].fabernr = value;
-    // Choosing a match again un-marks a line whose match was removed
-    deletedRows.delete(rowIndex);
-
-    try {
-        await apiCall('/api/match/override', {
-            method: 'POST',
-            body: JSON.stringify({ row_index: rowIndex, fabernr: value })
-        });
-        renderTables();
-        restoreScroll(saved);
-    } catch (e) {
-        // toast shown
     }
 }
 
@@ -1416,65 +1584,63 @@ async function exportBom() {
 }
 
 // ========================================================================
-// Keyboard Navigation
+// Keyboard: arrows move the selection (the open panel moves along), Enter opens or closes, Esc closes
 // ========================================================================
 
 function visibleRowAfter(start, step) {
     const totalRows = bomData.rows.length;
     for (let i = start + step; i >= 0 && i < totalRows; i += step) {
-        const tr = document.querySelector(`#matchTableBody tr[data-row="${i}"]`);
+        const tr = rowEl(i);
         if (tr && !tr.hidden) return i;
     }
     return null;
 }
 
 document.addEventListener('keydown', (e) => {
-    // Only handle keys when no modal is open
-    if (activeModal) return;
-
-    // Escape switches Copy / Delete mode off
-    if (e.key === 'Escape' && (copyMode || deleteMode)) {
-        setMode(null);
+    // Escape: first switch Copy / Delete mode off, then close the panel
+    if (e.key === 'Escape') {
+        if (copyMode || deleteMode) setMode(null);
+        else if (panel) closePanel();
         return;
     }
 
-    if (!bomData || !bomData.rows) return;
-    // Leave typing in the search field, the MPNfree dropdowns and buttons alone
-    if (e.target && e.target.closest && e.target.closest('input, select, textarea, button, a')) return;
+    if (!bomData || !bomData.rows || bomData.rows.length === 0) return;
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    // Leave typing in the search fields and the MPNfree dropdowns alone
+    const target = e.target && e.target.closest ? e.target : null;
+    if (target && target.closest('input, select, textarea')) return;
 
-    const totalRows = bomData.rows.length;
-    if (totalRows === 0) return;
-
-    if (e.key === 'ArrowDown') {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        const next = selectedRow === null ? visibleRowAfter(-1, 1) : visibleRowAfter(selectedRow, 1);
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        const next = selectedRow === null ? (step > 0 ? visibleRowAfter(-1, 1) : null) : visibleRowAfter(selectedRow, step);
         if (next === null) return;
-        selectRow(next);
-        scrollSelectedRowIntoView();
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (selectedRow === null) return;
-        const prev = visibleRowAfter(selectedRow, -1);
-        if (prev === null) return;
-        selectRow(prev);
-        scrollSelectedRowIntoView();
+        if (panel) openPanel(next);
+        else { selectRow(next); scrollSelectedRowIntoView(); }
     } else if (e.key === 'Enter') {
+        // Enter on a button or link keeps its own meaning
+        if (target && target.closest('button, a')) return;
+        if (selectedRow === null) return;
+        const tr = rowEl(selectedRow);
+        if (!tr || tr.hidden) return;
         e.preventDefault();
-        openSelectedRowModal();
+        if (deleteMode) deleteMatch(selectedRow);
+        else if (!copyMode) togglePanel(selectedRow);
     }
 });
 
 // ========================================================================
-// Delegated handlers on the sheet: row select / delete, Copy mode, MPN shortcuts, details
+// Delegated handlers on the sheet: row panel, Delete mode, Copy mode, MPN shortcuts
 // ========================================================================
 
 const _matchSheet = document.getElementById('matchSheet');
 
 _matchSheet.addEventListener('click', function(e) {
-    const tr = e.target.closest('#matchTableBody tr[data-row]');
+    const inPanel = e.target.closest('#matchTableBody tr.xrow');
+    const tr = inPanel ? null : e.target.closest('#matchTableBody tr[data-row]');
 
     // Copy mode: copy any cell's text to clipboard
-    if (copyMode) {
+    if (copyMode && !inPanel) {
         const td = e.target.closest('#matchTableBody td');
         if (td) {
             e.stopPropagation();
@@ -1492,7 +1658,7 @@ _matchSheet.addEventListener('click', function(e) {
         }
     }
 
-    // MPN click shortcuts: Ctrl+Click=Google, Alt+Click=DigiKey
+    // MPN click shortcuts: Ctrl+Click=Google, Alt+Click=DigiKey (in the table and in the panel)
     const mpnEl = e.target.closest('.mpn-clickable');
     if (mpnEl && (e.ctrlKey || e.metaKey || e.altKey)) {
         const mpn = mpnEl.innerText.trim();
@@ -1507,20 +1673,38 @@ _matchSheet.addEventListener('click', function(e) {
         return;
     }
 
+    if (inPanel) {
+        onPanelClick(e);
+        return;
+    }
+
     if (!tr) return;
+    if (e.target.closest('a, button, select, input')) return;
     const rowIndex = parseInt(tr.dataset.row, 10);
     if (deleteMode) {
-        deleteMatch(rowIndex);
-    } else {
         selectRow(rowIndex);
+        deleteMatch(rowIndex);
+        return;
     }
+    // The second click of a double click keeps the panel open
+    if (e.detail > 1) return;
+    // Dragging to select text in a line does not toggle its panel
+    const textSel = window.getSelection ? window.getSelection() : null;
+    if (textSel && !textSel.isCollapsed && tr.contains(textSel.anchorNode)) return;
+    togglePanel(rowIndex);
 });
 
-_matchSheet.addEventListener('dblclick', function(e) {
-    if (copyMode || deleteMode) return;
-    const tr = e.target.closest('#matchTableBody tr[data-row]');
-    if (!tr) return;
-    showRowDetailModal(parseInt(tr.dataset.row, 10));
+// Typing and Enter in the panel's search field
+_matchSheet.addEventListener('input', function(e) {
+    if (panel && e.target.classList && e.target.classList.contains('xq')) panel.input = e.target.value;
+});
+
+_matchSheet.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('xq')) {
+        e.preventDefault();
+        e.stopPropagation();
+        runPanelSearch();
+    }
 });
 
 // ========================================================================
