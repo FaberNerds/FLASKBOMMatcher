@@ -240,28 +240,22 @@ function restoreScroll(saved) {
 }
 
 // ========================================================================
-// Column widths: every column has a width the user can drag (the border at the right of its
-// header); text that does not fit ends in "..." and shows in full on hover. The text stays at
-// 100%: a table wider than the window scrolls sideways, with # and Status pinned left.
+// Auto-fit zoom: measure at 100%, zoom = available / needed, never below 60%.
+// Column widths: every column starts at its natural width (as wide as its content); the user
+// can drag a column narrower or wider (the right border of its header). A narrower column cuts
+// its text with "..." (full text on hover), so the table needs less room and zooms out less.
 // Widths are kept per browser (localStorage); a double click on a border resets that column.
 // ========================================================================
 
-const COLUMN_WIDTHS_KEY = 'bomMatcher.columnWidths';
-const MIN_COLUMN_WIDTH = 28;
-const DEFAULT_COLUMN_WIDTHS = {
-    'status': 92,
-    'c:Description': 220, 'c:MPN': 140, 'c:Manufacturer': 110, 'c:Quantity': 46, 'c:Refdes': 100,
-    'mpnfree': 66,
-    'e:FaberNr': 84, 'e:Omschrijving': 220, 'e:Manufacturer': 100, 'e:MPN': 140, 'e:KlantNaam': 100,
-    'e:Mounting': 66, 'e:Status': 84, 'e:Kostprijs': 82, 'e:Voorraad': 72, 'e:Verbruik': 72,
-    'e:InBestelling': 84, 'e:KlantNr': 60, 'e:Type': 110,
-    'p:value': 44, 'p:tol': 30, 'p:volt': 30, 'p:power': 30, 'p:pkg': 58,
-};
+const MIN_TABLE_ZOOM = 0.6;
+let currentTableZoom = 1;
+
+const COLUMN_WIDTHS_KEY = 'bomMatcher.columnWidths.v2';
+const MIN_COLUMN_WIDTH = 24;
 
 function loadColumnWidths() {
     try {
-        const raw = localStorage.getItem(COLUMN_WIDTHS_KEY);
-        const parsed = raw ? JSON.parse(raw) : {};
+        const parsed = JSON.parse(localStorage.getItem(COLUMN_WIDTHS_KEY) || '{}');
         return parsed && typeof parsed === 'object' ? parsed : {};
     } catch (e) {
         return {};
@@ -270,126 +264,101 @@ function loadColumnWidths() {
 
 let userColumnWidths = loadColumnWidths();
 
+/**
+ * Only the columns the user sized cut their text with "..." (and their .clip spans fill the
+ * column). The other columns render exactly as in the natural layout: zoomed-out text is a
+ * hair wider than at 100%, so cutting those would eat the last letter of a column that fits.
+ */
+function setCutColumns(positions) {
+    let style = document.getElementById('cutColumnsStyle');
+    if (!style) {
+        style = document.createElement('style');
+        style.id = 'cutColumnsStyle';
+        document.head.appendChild(style);
+    }
+    style.textContent = positions.map(n =>
+        `#matchTable.fixed-cols thead tr.cols th:nth-child(${n}), #matchTable.fixed-cols tr[data-row] > td:nth-child(${n})` +
+        ` { overflow: hidden; text-overflow: ellipsis; }` +
+        ` #matchTable.fixed-cols tr[data-row] > td:nth-child(${n}) .clip { max-width: none; }`
+    ).join('\n');
+}
+
 function saveColumnWidths() {
     try { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(userColumnWidths)); } catch (e) { /* ignore */ }
 }
-
-// Text columns the user has not set share the width of the window: on opening (and when the
-// window is resized) they shrink to fit, down to 55% of their default. The text itself stays 100%.
-const FLEX_COLUMNS = new Set(['c:Description', 'c:MPN', 'c:Manufacturer', 'c:Refdes', 'e:Omschrijving',
-    'e:Manufacturer', 'e:MPN', 'e:KlantNaam', 'e:Type']);
-const MIN_FLEX_FACTOR = 0.55;
-let autoColumnWidths = {};
-let autoColumnSignature = '';
 
 function userWidth(key) {
     const w = userColumnWidths[key];
     return (typeof w === 'number' && w >= MIN_COLUMN_WIDTH) ? w : null;
 }
 
-function columnWidth(key) {
-    return userWidth(key) || autoColumnWidths[key] || DEFAULT_COLUMN_WIDTHS[key] || 90;
+/**
+ * At zoom 100%: without user widths the table lays itself out (natural widths). With user
+ * widths, measure the natural width of every column, take the user's width where set, and fix
+ * them in the <colgroup> (table-layout: fixed). Returns the table width, or null when natural.
+ */
+function applyColumnWidths(table) {
+    const cols = Array.from(document.querySelectorAll('#matchCols col'));
+    table.classList.remove('fixed-cols');
+    cols.forEach(c => { c.style.width = ''; });
+    table.style.width = 'auto';
+    setCutColumns(cols.map((c, k) => (userWidth(c.dataset.col) ? k + 1 : 0)).filter(Boolean));
+    if (!cols.some(c => userWidth(c.dataset.col))) return null;
+
+    const ths = Array.from(document.querySelectorAll('#matchTableHead tr.cols th'));
+    if (ths.length !== cols.length) return null;
+    const widths = ths.map((th, k) => userWidth(cols[k].dataset.col) || Math.ceil(th.getBoundingClientRect().width));
+    cols.forEach((c, k) => { c.style.width = widths[k] + 'px'; });
+    table.classList.add('fixed-cols');
+    const total = widths.reduce((a, b) => a + b, 0);
+    table.style.width = total + 'px';
+    return total;
 }
 
-/** Widths of the flexible columns so the table fits the sheet (keys = all columns after #). */
-function computeAutoWidths(keys) {
-    const sheet = document.getElementById('matchSheet');
-    const available = (sheet ? sheet.clientWidth : 0) - 46 - 2;
-    const signature = keys.join('|') + '@' + available;
-    if (signature === autoColumnSignature) return;
-    autoColumnSignature = signature;
-
-    let fixed = 0;
-    let flexDefault = 0;
-    for (const key of keys) {
-        const base = DEFAULT_COLUMN_WIDTHS[key] || 90;
-        if (FLEX_COLUMNS.has(key) && !userWidth(key)) flexDefault += base;
-        else fixed += userWidth(key) || base;
-    }
-    let factor = 1;
-    if (available > 0 && flexDefault > 0 && fixed + flexDefault > available) {
-        factor = Math.max(MIN_FLEX_FACTOR, (available - fixed) / flexDefault);
-    }
-    autoColumnWidths = {};
-    for (const key of keys) {
-        if (FLEX_COLUMNS.has(key)) {
-            autoColumnWidths[key] = Math.max(56, Math.floor((DEFAULT_COLUMN_WIDTHS[key] || 90) * factor));
-        }
-    }
-}
-
-/** Recompute the flexible widths for the current window and set them on the <colgroup>. */
-function applyColumnWidths() {
-    const cols = Array.from(document.querySelectorAll('#matchCols col[data-col]'));
-    if (!cols.length) return;
-    computeAutoWidths(cols.map(c => c.dataset.col));
-    cols.forEach(col => { col.style.width = columnWidth(col.dataset.col) + 'px'; });
-}
-
-/** The text stays at 100%: on a window resize the flexible columns follow, and the row panel. */
 function fitMatchTable() {
-    applyColumnWidths();
+    const sheet = document.getElementById('matchSheet');
+    const table = document.getElementById('matchTable');
+    if (!sheet || !table) return;
+    const keepTop = sheet.scrollTop;
+    const keepLeft = sheet.scrollLeft;
+
+    // The open row panel must not take part in the measurement
+    const panelBox = table.querySelector('.xpanel');
+    if (panelBox) panelBox.style.display = 'none';
+
+    table.style.zoom = 1;
+    const fixedWidth = applyColumnWidths(table);
+    const needed = fixedWidth || table.offsetWidth;
+    const available = sheet.clientWidth;
+    if (!needed || !available || needed <= available) {
+        table.style.width = '100%';
+        currentTableZoom = 1;
+    } else {
+        let z = Math.max(MIN_TABLE_ZOOM, available / needed);
+        table.style.width = needed + 'px';
+        table.style.zoom = z.toFixed(3);
+        // Small text does not scale exactly with zoom: shrink a little more until the table really fits.
+        for (let i = 0; i < 4 && z > MIN_TABLE_ZOOM; i++) {
+            const w = table.getBoundingClientRect().width;
+            if (w <= available + 0.5) break;
+            z = Math.max(MIN_TABLE_ZOOM, z * available / w - 0.002);
+            table.style.zoom = z.toFixed(3);
+        }
+        currentTableZoom = z;
+    }
+    if (panelBox) panelBox.style.display = '';
     sizePanel();
+    sheet.scrollTop = keepTop;
+    sheet.scrollLeft = keepLeft;
 }
 
-// Dragging a header border sets that column's width; a double click resets it
-(function setupColumnResize() {
-    const head = document.getElementById('matchTableHead');
-    if (!head) return;
-    const colOf = key => document.querySelector(`#matchCols col[data-col="${CSS.escape(key)}"]`);
-
-    head.addEventListener('mousedown', (e) => {
-        const handle = e.target.closest('.col-resize-handle');
-        if (!handle || e.button !== 0) return;
-        e.preventDefault();
-        e.stopPropagation();
-        const key = handle.dataset.col;
-        const col = colOf(key);
-        if (!col) return;
-        const startX = e.clientX;
-        const startWidth = col.getBoundingClientRect().width || columnWidth(key);
-        handle.classList.add('active');
-        document.body.classList.add('col-resizing');
-
-        const onMove = (ev) => {
-            const w = Math.round(Math.max(MIN_COLUMN_WIDTH, startWidth + ev.clientX - startX));
-            col.style.width = w + 'px';
-            userColumnWidths[key] = w;
-        };
-        const onUp = () => {
-            handle.classList.remove('active');
-            document.body.classList.remove('col-resizing');
-            document.removeEventListener('mousemove', onMove);
-            document.removeEventListener('mouseup', onUp);
-            saveColumnWidths();
-            sizePanel();
-        };
-        document.addEventListener('mousemove', onMove);
-        document.addEventListener('mouseup', onUp);
-    });
-
-    head.addEventListener('dblclick', (e) => {
-        const handle = e.target.closest('.col-resize-handle');
-        if (!handle) return;
-        const key = handle.dataset.col;
-        delete userColumnWidths[key];
-        saveColumnWidths();
-        const col = colOf(key);
-        if (col) col.style.width = columnWidth(key) + 'px';
-        sizePanel();
-    });
-
-    head.addEventListener('click', (e) => {
-        if (e.target.closest('.col-resize-handle')) e.stopPropagation();
-    });
-})();
-
-/** The open row panel: the visible width of the sheet, sticky left. */
+/** The open row panel: the visible width of the sheet, sticky left, text back at 100%. */
 function sizePanel() {
     const sheet = document.getElementById('matchSheet');
     const box = sheet && sheet.querySelector('.xpanel');
     if (!box) return;
     const td = box.closest('td');
+    box.style.zoom = (1 / (currentTableZoom || 1)).toFixed(4);
     const visible = Math.min(sheet.clientWidth, td.getBoundingClientRect().width);
     box.style.width = Math.max(600, Math.floor(visible) - 1) + 'px';
 }
@@ -606,7 +575,7 @@ function getMappedColumns() {
     return mappedCols;
 }
 
-// ERP match columns: key (for the width), label, header class, header title
+// ERP match and parameter columns: key (for the width), label, header class, header title
 const ERP_COLUMNS = [
     ['e:FaberNr', 'FaberNr', 'g-start'], ['e:Omschrijving', 'Omschrijving'], ['e:Manufacturer', 'Manufacturer'],
     ['e:MPN', 'MPN'], ['e:KlantNaam', 'KlantNaam'], ['e:Mounting', 'Mounting'], ['e:Status', 'Status'],
@@ -619,15 +588,15 @@ const PARAM_COLUMNS = [
     ['p:power', 'P', 'param-col', 'Power'], ['p:pkg', 'Package', 'param-col', 'Package'],
 ];
 
-/** The table head plus the <colgroup> with every column's width; each column header has a drag handle. */
+/** The table head, plus a <colgroup> with one <col> per column (widths: applyColumnWidths). */
 function renderTableHead(mappedCols, hasMpnfree) {
     const customerCount = mappedCols.length + (hasMpnfree ? 1 : 0);
 
     // [key, label, class, title] for every column after #
     const columns = [['status', 'Status', 'pin2']];
     for (const col of mappedCols) {
-        const label = leftColumnLabels[col.std] || col.std;
-        columns.push([`c:${col.std}`, label, col.std === 'Quantity' ? 'fx-num' : '', col.std === 'Quantity' ? 'Quantity' : '']);
+        const isQty = col.std === 'Quantity';
+        columns.push([`c:${col.std}`, leftColumnLabels[col.std] || col.std, isQty ? 'fx-num' : '', isQty ? 'Quantity' : '']);
     }
     if (hasMpnfree) columns.push(['mpnfree', 'MPNfree']);
     columns.push(...ERP_COLUMNS, ...PARAM_COLUMNS);
@@ -635,19 +604,17 @@ function renderTableHead(mappedCols, hasMpnfree) {
     let grp = '<tr class="grp"><th class="pin1"></th><th class="pin2"></th>';
     if (customerCount > 0) grp += `<th colspan="${customerCount}">Customer BOM</th>`;
     grp += `<th colspan="${ERP_COLUMN_COUNT}" class="g-start">ERP match</th>`;
-    grp += `<th colspan="${PARAM_COLUMN_COUNT}" class="g-start">Params</th><th class="fill"></th></tr>`;
+    grp += `<th colspan="${PARAM_COLUMN_COUNT}" class="g-start">Params</th></tr>`;
 
-    computeAutoWidths(columns.map(c => c[0]));
     let cols = '<tr class="cols"><th class="pin1 fx-num">#</th>';
-    let colgroup = '<col class="col-pin1">';
+    let colgroup = '<col data-col="#">';
     for (const [key, label, cls, title] of columns) {
         const titleAttr = title ? ` title="${escapeHtml(title)}"` : '';
         cols += `<th class="${cls || ''}"${titleAttr}>${escapeHtml(label)}` +
             `<span class="col-resize-handle" data-col="${key}" title="Drag to resize · double-click to reset"></span></th>`;
-        colgroup += `<col data-col="${key}" style="width:${columnWidth(key)}px">`;
+        colgroup += `<col data-col="${key}">`;
     }
-    cols += '<th class="fill"></th></tr>';
-    colgroup += '<col class="col-fill">';
+    cols += '</tr>';
 
     document.getElementById('matchCols').innerHTML = colgroup;
     document.getElementById('matchTableHead').innerHTML = grp + cols;
@@ -787,8 +754,7 @@ function renderTables() {
 
     renderTableHead(mappedCols, hasMpnfree);
 
-    // # + Status + customer + ERP + params + the filler column that takes up the space left
-    const colCount = 2 + mappedCols.length + (hasMpnfree ? 1 : 0) + ERP_COLUMN_COUNT + PARAM_COLUMN_COUNT + 1;
+    const colCount = 2 + mappedCols.length + (hasMpnfree ? 1 : 0) + ERP_COLUMN_COUNT + PARAM_COLUMN_COUNT;
     const order = displayOrder();
     const groupSize = {};
     order.forEach(o => { groupSize[o.group] = (groupSize[o.group] || 0) + 1; });
@@ -815,7 +781,7 @@ function renderTables() {
         html += renderCustomerCells(i, row, mappedCols, hasMpnfree, state);
         html += renderErpCells(i, row, state);
         html += paramsReady ? buildMatcherParamCells(i) : '<td class="pc g-start"></td><td class="pc"></td><td class="pc"></td><td class="pc"></td><td class="pc"></td>';
-        html += '<td class="fill"></td></tr>';
+        html += '</tr>';
     }
     html += `<tr class="empty-row" hidden><td colspan="${colCount}" class="table-empty">No lines match the search or the status filter.</td></tr>`;
 
@@ -843,6 +809,67 @@ function renderTables() {
         sheet.scrollLeft = saved.left;
     }
 }
+
+// ========================================================================
+// Column resize: drag the right border of a column header; double click resets the column
+// ========================================================================
+
+(function setupColumnResize() {
+    const head = document.getElementById('matchTableHead');
+    if (!head) return;
+    const colOf = key => document.querySelector(`#matchCols col[data-col="${CSS.escape(key)}"]`);
+
+    head.addEventListener('mousedown', (e) => {
+        const handle = e.target.closest('.col-resize-handle');
+        if (!handle || e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const key = handle.dataset.col;
+        const th = handle.closest('th');
+        const table = document.getElementById('matchTable');
+        const zoom = currentTableZoom || 1;
+        // Width in table pixels (the table is zoomed: a screen pixel is 1/zoom table pixels)
+        const startWidth = Math.round(th.getBoundingClientRect().width / zoom);
+        const startX = e.clientX;
+        userColumnWidths[key] = startWidth;
+        fitMatchTable();  // fixes all columns at their current width; the zoom stays the same
+        const col = colOf(key);
+        if (!col) return;
+        handle.classList.add('active');
+        document.body.classList.add('col-resizing');
+
+        const onMove = (ev) => {
+            const w = Math.round(Math.max(MIN_COLUMN_WIDTH, startWidth + (ev.clientX - startX) / zoom));
+            userColumnWidths[key] = w;
+            col.style.width = w + 'px';
+            const total = Array.from(document.querySelectorAll('#matchCols col'))
+                .reduce((sum, c) => sum + (parseFloat(c.style.width) || 0), 0);
+            table.style.width = total + 'px';
+        };
+        const onUp = () => {
+            handle.classList.remove('active');
+            document.body.classList.remove('col-resizing');
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+            saveColumnWidths();
+            fitMatchTable();  // zoom again for the new widths
+        };
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    });
+
+    head.addEventListener('dblclick', (e) => {
+        const handle = e.target.closest('.col-resize-handle');
+        if (!handle) return;
+        delete userColumnWidths[handle.dataset.col];
+        saveColumnWidths();
+        fitMatchTable();
+    });
+
+    head.addEventListener('click', (e) => {
+        if (e.target.closest('.col-resize-handle')) e.stopPropagation();
+    });
+})();
 
 // ========================================================================
 // MPNfree Dropdown Rendering
