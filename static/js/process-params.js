@@ -570,22 +570,11 @@ function _paramNaCells(tip) {
  */
 function buildMatcherParamCells(rowIndex) {
     if (!bomData) return _paramNaCells('');
-    const mapping = bomData.column_mapping || {};
-    const row = (bomData.rows || [])[rowIndex] || {};
     const strIdx = String(rowIndex);
     const match = matchResults[strIdx];
     const sel = selections[strIdx] || {};
 
-    // Get customer BOM description (left side, supports multi-column mapping)
-    const descMapping = mapping['Description'];
-    let customerDesc = '';
-    if (Array.isArray(descMapping)) {
-        customerDesc = descMapping.map(c => String(row[c] || '').trim()).filter(v => v).join(' ');
-    } else if (descMapping) {
-        customerDesc = String(row[descMapping] || '');
-    }
-
-    // Get ERP match description (right side)
+    // The linked ERP article of the line (a suggestion alone is not linked)
     let displayItem = null;
     if (sel.fabernr && match && match.suggestions) {
         displayItem = match.suggestions.find(s => s.FaberNr === sel.fabernr);
@@ -594,7 +583,27 @@ function buildMatcherParamCells(rowIndex) {
         displayItem = match.auto_selected;
     }
     if (!displayItem) return _paramNaCells(match ? 'No ERP match' : 'Not matched yet');
-    const erpDesc = String(displayItem.Omschrijving || '');
+    return buildParamCellsFor(rowIndex, displayItem);
+}
+
+/**
+ * The five parameter cells of one BOM line against any ERP article: the line's own match in
+ * the table, or a candidate in the row panel. Customer BOM description = main.
+ */
+function buildParamCellsFor(rowIndex, erpItem) {
+    if (!bomData || !erpItem) return _paramNaCells('');
+    const mapping = bomData.column_mapping || {};
+    const row = (bomData.rows || [])[rowIndex] || {};
+
+    // Customer BOM description (supports multi-column mapping)
+    const descMapping = mapping['Description'];
+    let customerDesc = '';
+    if (Array.isArray(descMapping)) {
+        customerDesc = descMapping.map(c => String(row[c] || '').trim()).filter(v => v).join(' ');
+    } else if (descMapping) {
+        customerDesc = String(row[descMapping] || '');
+    }
+    const erpDesc = String(erpItem.Omschrijving || '');
 
     // Strip HTML tags from descriptions (they may contain highlight spans)
     const cleanCustomerDesc = customerDesc.replace(/<[^>]*>/g, '');
