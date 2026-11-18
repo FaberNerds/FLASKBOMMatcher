@@ -316,11 +316,12 @@ def find_ipn_batch(
         ipn = _get_mapped_value(row, column_mapping, 'FaberNr')
         desc = _get_mapped_value(row, column_mapping, 'Description')
         mfr = _get_mapped_value(row, column_mapping, 'Manufacturer')
+        refdes = _get_mapped_value(row, column_mapping, 'Refdes')
         is_mpnfree = mpnfree_flags.get(str(i), False)
 
         # MPNfree rows: parameterized search by description (skip MPN matching)
         if is_mpnfree and desc:
-            category = detect_category(desc)
+            category = detect_category(desc, refdes)
             if category and is_generic_rc(category):
                 param_rows.append((i, desc, category, mpn or ''))
                 logger.debug(f"Row {i}: path=PARAM (MPNfree), category='{category}', desc='{desc[:60]}'")
@@ -457,7 +458,7 @@ def find_ipn_single(
 
     # MPNfree rows: parameterized search by description
     if is_mpnfree and desc:
-        category = detect_category(desc)
+        category = detect_category(desc, _get_mapped_value(row, column_mapping, 'Refdes'))
         if category and is_generic_rc(category):
             result = _search_row_by_parameters(row_index, desc, category, selected_klant_nr, mpn or '')
             if result is not None:

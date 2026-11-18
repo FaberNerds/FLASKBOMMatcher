@@ -61,7 +61,7 @@ def _prepare_old_parts(previous_bom: List[Dict]) -> List[Dict]:
         if not fn:
             continue
         desc = comp.get('Description', '') or ''
-        cat = detect_category(desc)
+        cat = detect_category(desc, comp.get('Refdes', '') or '')
         generic = bool(cat and is_generic_rc(cat))
         cat_key = cat.upper() if cat else ''
         params = extract_parameters(desc, cat) if generic else {}
@@ -135,7 +135,7 @@ def _param_candidates(cat_key: str, q_params: Dict[str, str], old_parts: List[Di
     return [(fn, round(score, 2)) for fn, score in ranked[:MAX_SUGGESTIONS]]
 
 
-def _match_one(mpn: str, desc: str, mfr: str, old_parts: List[Dict]) -> Dict[str, Any]:
+def _match_one(mpn: str, desc: str, mfr: str, old_parts: List[Dict], refdes: str = '') -> Dict[str, Any]:
     """Determine candidate matches for one new row (before live enrichment)."""
     norm_mpn = _norm_mpn(mpn)
     if norm_mpn:
@@ -146,7 +146,7 @@ def _match_one(mpn: str, desc: str, mfr: str, old_parts: List[Dict]) -> Dict[str
             return {'method': 'previous_mpn', 'category': '', 'q_params': {},
                     'mpn': mpn, 'cands': cands, 'old_mpns': old_mpns}
 
-    cat = detect_category(desc)
+    cat = detect_category(desc, refdes)
     if cat and is_generic_rc(cat):
         cat_key = cat.upper()
         q_params = extract_parameters(desc, cat)
@@ -264,7 +264,7 @@ def match_against_previous_bom(
         mpn = _get_mapped_value(row, column_mapping, 'MPN')
         desc = _get_mapped_value(row, column_mapping, 'Description')
         mfr = _get_mapped_value(row, column_mapping, 'Manufacturer')
-        cand = _match_one(mpn, desc, mfr, old_parts)
+        cand = _match_one(mpn, desc, mfr, old_parts, _get_mapped_value(row, column_mapping, 'Refdes'))
         row_candidates[i] = cand
         for fn, _score in cand['cands']:
             all_fabernrs.add(fn)
@@ -299,7 +299,7 @@ def match_previous_single(
     desc = _get_mapped_value(row, column_mapping, 'Description')
     mfr = _get_mapped_value(row, column_mapping, 'Manufacturer')
 
-    cand = _match_one(mpn, desc, mfr, old_parts)
+    cand = _match_one(mpn, desc, mfr, old_parts, _get_mapped_value(row, column_mapping, 'Refdes'))
     fabernrs = [fn for fn, _score in cand['cands']]
     erp_lookup: Dict[str, Dict] = {}
     if fabernrs:

@@ -455,6 +455,46 @@
     background: var(--steel-soft);
 }
 
+/* Group divider per component type: Weerstanden · 44 (process.js renderTables) */
+.match-table tr.type-divider td {
+    padding: 6px 12px 4px;
+    background: var(--sheet-head);
+    border-bottom: 1px solid var(--sheet-edge);
+    cursor: default;
+}
+
+.match-table tr.type-divider + tr[data-row] td {
+    border-top: 0;
+}
+
+.match-table tbody tr.type-divider:not(:first-child) td {
+    border-top: 1px solid var(--sheet-edge);
+}
+
+/* Stays in view when the sheet scrolls sideways */
+.type-divider-text {
+    position: sticky;
+    left: 12px;
+}
+
+.type-divider-label,
+.type-divider-count {
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+}
+
+.type-divider-count {
+    margin-left: 8px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    letter-spacing: 0;
+    font-variant-numeric: tabular-nums;
+}
+
 .match-table tr.empty-row td {
     cursor: default;
     background: var(--surface-raised) !important;

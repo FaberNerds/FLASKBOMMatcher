@@ -619,6 +619,49 @@ function renderErpCells(rowIndex, row, state) {
     return html;
 }
 
+// ========================================================================
+// Lines grouped per component type (as BOM Compare): resistors, capacitors, coils, the rest;
+// within a group by refdes number. The Export keeps the customer's order.
+// ========================================================================
+
+const TYPE_GROUP_ORDER = { resistor: 0, capacitor: 1, inductor: 2, other: 3 };
+const TYPE_GROUP_LABELS = {
+    resistor: 'Weerstanden',
+    capacitor: 'Condensatoren',
+    inductor: 'Spoelen en ferrieten',
+    other: 'Overig',
+};
+// ERP article group (field Type) -> group, for lines the customer description does not reveal
+const ERP_TYPE_GROUPS = {
+    'WEERSTANDEN': 'resistor',
+    'CONDENSATOREN': 'capacitor',
+    "ELCO'S EN TANTALEN": 'capacitor',
+    'SPOELEN EN SUPPRESSORS': 'inductor',
+};
+
+/**
+ * Group of a line: from the customer's description and refdes (server, row_types). Only when
+ * that says 'other', an assigned ERP article's Type can still place it (e.g. a bare MPN line).
+ * Suggestions do not move a line, so a wrong suggestion never hides it in another group.
+ */
+function rowGroup(rowIndex) {
+    const fromBom = (bomData.row_types && bomData.row_types[rowIndex]) || 'other';
+    if (fromBom !== 'other') return fromBom;
+    const state = getRowState(rowIndex);
+    const item = state.fabernr ? currentItem(state) : null;
+    const erpType = item ? String(item.Type || '').trim().toUpperCase() : '';
+    return ERP_TYPE_GROUPS[erpType] || 'other';
+}
+
+/** Row indexes in display order, each with its group. */
+function displayOrder() {
+    const nums = bomData.row_refdes_num || [];
+    const refNum = i => (nums[i] === null || nums[i] === undefined ? Infinity : nums[i]);
+    return (bomData.rows || []).map((_, i) => ({ i, group: rowGroup(i), num: refNum(i) }))
+        .sort((a, b) => (TYPE_GROUP_ORDER[a.group] - TYPE_GROUP_ORDER[b.group]) ||
+            (a.num === b.num ? 0 : (a.num < b.num ? -1 : 1)) || (a.i - b.i));
+}
+
 function renderTables() {
     if (!bomData) return;
 
@@ -632,15 +675,28 @@ function renderTables() {
 
     renderTableHead(mappedCols, hasMpnfree);
 
+    const colCount = 2 + mappedCols.length + (hasMpnfree ? 1 : 0) + ERP_COLUMN_COUNT + PARAM_COLUMN_COUNT;
+    const order = displayOrder();
+    const groupSize = {};
+    order.forEach(o => { groupSize[o.group] = (groupSize[o.group] || 0) + 1; });
+
     let html = '';
-    for (let i = 0; i < rows.length; i++) {
+    let lastGroup = null;
+    for (const { i, group } of order) {
+        // A divider above each group: Weerstanden · 44
+        if (group !== lastGroup) {
+            html += `<tr class="type-divider" data-group="${group}"><td colspan="${colCount}">` +
+                `<span class="type-divider-text"><span class="type-divider-label">${TYPE_GROUP_LABELS[group]}</span>` +
+                `<span class="type-divider-count">${groupSize[group]}</span></span></td></tr>`;
+            lastGroup = group;
+        }
         const row = rows[i];
         const state = getRowState(i);
         const classes = [];
         if (state.status === 'deleted') classes.push('row-deleted');
         const selAttr = selectedRow === i ? ' aria-selected="true"' : '';
 
-        html += `<tr class="${classes.join(' ')}" data-row="${i}" data-status="${state.status || 'none'}"${selAttr}>`;
+        html += `<tr class="${classes.join(' ')}" data-row="${i}" data-group="${group}" data-status="${state.status || 'none'}"${selAttr}>`;
         html += `<td class="pin1 fx-num fx-mono rownum">${i + 1}</td>`;
         html += rowStatusCell(state);
         html += renderCustomerCells(i, row, mappedCols, hasMpnfree, state);
@@ -648,7 +704,6 @@ function renderTables() {
         html += paramsReady ? buildMatcherParamCells(i) : '<td class="pc g-start"></td><td class="pc"></td><td class="pc"></td><td class="pc"></td><td class="pc"></td>';
         html += '</tr>';
     }
-    const colCount = 2 + mappedCols.length + (hasMpnfree ? 1 : 0) + ERP_COLUMN_COUNT + PARAM_COLUMN_COUNT;
     html += `<tr class="empty-row" hidden><td colspan="${colCount}" class="table-empty">No lines match the search or the status filter.</td></tr>`;
 
     document.getElementById('matchTableBody').innerHTML = html;
@@ -1477,6 +1532,7 @@ function filterTable() {
 
     let any = false;
     let total = 0;
+    const shownPerGroup = {};
     tbody.querySelectorAll('tr[data-row]').forEach(tr => {
         total++;
         let show = rowMatchesStatus(tr.dataset.status === 'none' ? '' : tr.dataset.status);
@@ -1484,7 +1540,17 @@ function filterTable() {
             show = tr.textContent.toLowerCase().includes(searchText);
         }
         tr.hidden = !show;
-        if (show) any = true;
+        if (show) {
+            any = true;
+            shownPerGroup[tr.dataset.group] = (shownPerGroup[tr.dataset.group] || 0) + 1;
+        }
+    });
+    // Group dividers: the number of lines shown, hidden when none of the group is shown
+    tbody.querySelectorAll('tr.type-divider').forEach(div => {
+        const shown = shownPerGroup[div.dataset.group] || 0;
+        div.hidden = shown === 0;
+        const count = div.querySelector('.type-divider-count');
+        if (count) count.textContent = shown;
     });
     // A filtered-out line takes its open panel with it
     if (panel) {
@@ -1587,13 +1653,13 @@ async function exportBom() {
 // Keyboard: arrows move the selection (the open panel moves along), Enter opens or closes, Esc closes
 // ========================================================================
 
+/** The next (step 1) or previous (step -1) shown line in display order; start -1 = the first. */
 function visibleRowAfter(start, step) {
-    const totalRows = bomData.rows.length;
-    for (let i = start + step; i >= 0 && i < totalRows; i += step) {
-        const tr = rowEl(i);
-        if (tr && !tr.hidden) return i;
-    }
-    return null;
+    const shown = Array.from(document.querySelectorAll('#matchTableBody tr[data-row]')).filter(tr => !tr.hidden);
+    if (!shown.length) return null;
+    const pos = shown.findIndex(tr => parseInt(tr.dataset.row, 10) === start);
+    const next = pos < 0 ? (step > 0 ? shown[0] : null) : shown[pos + step];
+    return next ? parseInt(next.dataset.row, 10) : null;
 }
 
 document.addEventListener('keydown', (e) => {
@@ -1642,7 +1708,7 @@ _matchSheet.addEventListener('click', function(e) {
     // Copy mode: copy any cell's text to clipboard
     if (copyMode && !inPanel) {
         const td = e.target.closest('#matchTableBody td');
-        if (td) {
+        if (td && !td.closest('tr.type-divider')) {
             e.stopPropagation();
             e.preventDefault();
             const text = (td.dataset.copy || td.textContent).trim();

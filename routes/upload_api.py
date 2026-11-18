@@ -16,6 +16,8 @@ from services.session_service import (
     save_to_history, has_process_data, clear_process_data
 )
 from services.klant_cache_service import get_all_klanten
+from services.category_detect_service import detect_category, component_group, refdes_number
+from services.match_service import _get_mapped_value
 
 logger = logging.getLogger(__name__)
 
@@ -184,10 +186,21 @@ def get_bom_data():
     if not bom_data:
         return jsonify({'error': 'No file uploaded'}), 400
 
+    rows = bom_data.get('rows', [])
+    mapping = bom_data.get('column_mapping', {})
+    # Match page: lines grouped resistors, capacitors, coils, the rest, by refdes number within a group
+    row_types, row_refdes_num = [], []
+    for row in rows:
+        refdes = _get_mapped_value(row, mapping, 'Refdes')
+        row_types.append(component_group(detect_category(_get_mapped_value(row, mapping, 'Description'), refdes)))
+        row_refdes_num.append(refdes_number(refdes))
+
     return jsonify({
         'headers': bom_data.get('headers', []),
-        'rows': bom_data.get('rows', []),
-        'column_mapping': bom_data.get('column_mapping', {}),
+        'rows': rows,
+        'column_mapping': mapping,
+        'row_types': row_types,
+        'row_refdes_num': row_refdes_num,
         'total_rows': len(bom_data.get('rows', [])),
         'name': bom_data.get('name', ''),
         'klant_nr': bom_data.get('klant_nr', ''),

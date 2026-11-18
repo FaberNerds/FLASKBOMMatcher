@@ -231,7 +231,8 @@ def assess_mpnfree():
                 'index': i,
                 'mpn': _get_mapped_value(row, mapping, 'MPN'),
                 'manufacturer': _get_mapped_value(row, mapping, 'Manufacturer'),
-                'description': _get_mapped_value(row, mapping, 'Description')
+                'description': _get_mapped_value(row, mapping, 'Description'),
+                'refdes': _get_mapped_value(row, mapping, 'Refdes'),
             })
 
         results = assess_mpnfree_batch_local(input_rows)
