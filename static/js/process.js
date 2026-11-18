@@ -37,7 +37,7 @@ const leftColumns = ['Description', 'MPN', 'Manufacturer', 'Quantity', 'Refdes']
 const leftColumnLabels = { Description: 'Description', MPN: 'MPN', Manufacturer: 'Manufacturer', Quantity: 'Qty', Refdes: 'Refdes' };
 
 // ERP match columns (13) and parameter columns (5)
-const ERP_COLUMN_COUNT = 13;
+const ERP_COLUMN_COUNT = 8;
 const PARAM_COLUMN_COUNT = 5;
 
 // ========================================================================
@@ -370,7 +370,11 @@ function scheduleFit() {
 }
 
 window.addEventListener('resize', scheduleFit);
+// Fit again once the web fonts (Inter, IBM Plex Mono) are in: text measured with a fallback font
+// is narrower, so a first fit could leave the table a little wider than the sheet
 if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
+if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', scheduleFit);
+window.addEventListener('load', scheduleFit);
 
 // ========================================================================
 // Cell formatting (house style: numbers right in mono, Dutch notation, — for missing)
@@ -405,11 +409,6 @@ function monoCell(value) {
     return `<td class="fx-mono" title="${escapeHtml(value)}">${escapeHtml(value)}</td>`;
 }
 
-function numCell(value) {
-    const n = toNumber(value);
-    if (n === null) return `<td class="fx-num">${NIL}</td>`;
-    return `<td class="fx-num fx-mono">${fmtQty(n)}</td>`;
-}
 
 /** Kostprijs as '€ 0,0000'; it comes in as 0 when Exact has no cost price, so 0 shows as missing. */
 function priceHtml(value) {
@@ -582,9 +581,8 @@ function getMappedColumns() {
 // ERP match and parameter columns: key (for the width), label, header class, header title
 const ERP_COLUMNS = [
     ['e:FaberNr', 'FaberNr', 'g-start'], ['e:Omschrijving', 'Omschrijving'], ['e:Manufacturer', 'Manufacturer'],
-    ['e:MPN', 'MPN'], ['e:KlantNaam', 'KlantNaam'], ['e:Mounting', 'Mounting'], ['e:Status', 'Status'],
-    ['e:Kostprijs', 'Kostprijs', 'fx-num'], ['e:Voorraad', 'Voorraad', 'fx-num'], ['e:Verbruik', 'Verbruik', 'fx-num'],
-    ['e:InBestelling', 'InBestelling', 'fx-num'], ['e:KlantNr', 'KlantNr'], ['e:Type', 'Type'],
+    ['e:MPN', 'MPN'], ['e:Mounting', 'Mounting'], ['e:Status', 'Status'],
+    ['e:Kostprijs', 'Kostprijs', 'fx-num'], ['e:Voorraad', 'Voorraad', 'fx-num'],
 ];
 const PARAM_COLUMNS = [
     ['p:value', 'Value', 'param-col g-start', 'Value (Ω resistor, -||- capacitor, L coil)'],
@@ -664,9 +662,8 @@ function renderErpCells(rowIndex, row, state) {
     const auto = state.displayItem;
     if (!auto) {
         return `<td class="g-start">${NIL}</td>` +
-            `<td>${NIL}</td>`.repeat(6) +
-            `<td class="fx-num">${NIL}</td>`.repeat(4) +
-            `<td>${NIL}</td>`.repeat(2);
+            `<td>${NIL}</td>`.repeat(5) +
+            `<td class="fx-num">${NIL}</td>`.repeat(2);
     }
     const mapping = bomData.column_mapping || {};
     let html = '';
@@ -690,15 +687,10 @@ function renderErpCells(rowIndex, row, state) {
     html += textCell(auto.Manufacturer, 'clip-m');
     const mpnHtml = renderMpnHighlights(auto, state.match, row, mapping);
     html += mpnHtml ? `<td class="fx-mono">${mpnHtml}</td>` : `<td>${NIL}</td>`;
-    html += textCell(auto.KlantNaam, 'clip-m');
     html += mountingCell(auto.Mounting);
     html += erpStatusCell(auto.Status);
     html += priceCell(auto.Kostprijs);
     html += stockCell(auto.Voorraad);
-    html += numCell(auto.Verbruik);
-    html += numCell(auto.InBestelling);
-    html += monoCell(auto.KlantNr);
-    html += textCell(auto.Type, 'clip-t');
     return html;
 }
 
@@ -1433,7 +1425,6 @@ function panelCurrentHtml(rowIndex) {
     const row = (bomData.rows || [])[rowIndex] || {};
     const mapping = bomData.column_mapping || {};
     const customerDesc = getMappedValue(row, mapping.Description);
-    const customerMpn = getMappedValue(row, mapping.MPN).trim();
     const isSugg = !!item && !state.fabernr;
     const nr = state.fabernr || (item && item.FaberNr) || '';
 
@@ -1447,13 +1438,9 @@ function panelCurrentHtml(rowIndex) {
         `${isSugg ? '<span class="fx-badge fx-badge-steel">Suggestion</span>' : statusBadge(state)}</div>`;
 
     const lines = compareDescriptions(customerDesc, item ? item.Omschrijving : '');
-    h += `<div class="xab-line"><span class="xab xab-a" title="Customer BOM">A</span><span class="xab-text">${customerDesc ? lines.a : NIL}</span></div>`;
+    h += `<div class="xab-line"><span class="xab xab-a" title="Customer BOM">A</span><span class="xab-text" title="${escapeHtml(customerDesc)}">${customerDesc ? lines.a : NIL}</span></div>`;
     if (item) {
-        h += `<div class="xab-line"><span class="xab xab-b" title="ERP">B</span><span class="xab-text">${item.Omschrijving ? lines.b : NIL}</span></div>` +
-            '<div class="xab-mpn">' +
-            `<span><span class="xab xab-a xab-sm">A</span><span class="fx-mono">${customerMpn ? escapeHtml(customerMpn) : NIL}</span></span>` +
-            `<span><span class="xab xab-b xab-sm">B</span>${isBlank(item.MPN) ? NIL : mpnHtml(item.MPN, customerMpn)}</span>` +
-            (isBlank(item.Mounting) ? '' : mountingBadge(item.Mounting)) + '</div>' +
+        h += `<div class="xab-line"><span class="xab xab-b" title="ERP">B</span><span class="xab-text" title="${escapeHtml(item.Omschrijving || '')}">${item.Omschrijving ? lines.b : NIL}</span></div>` +
             panelFactsHtml(rowIndex, item);
     } else if (state.fabernr) {
         h += '<div class="xnone-text">Assigned by hand; the article details are not loaded.</div>';
@@ -1464,23 +1451,7 @@ function panelCurrentHtml(rowIndex) {
         h += `<div class="xnone-text">${text}</div>`;
     }
 
-    const qty = getMappedValue(row, mapping.Quantity).trim();
-    const refdes = getMappedValue(row, mapping.Refdes).trim();
-    const facts = [];
-    if (item) facts.push(`<span>Kostprijs<b>${priceHtml(item.Kostprijs)}</b></span>`, `<span>Voorraad<b>${stockHtml(item.Voorraad)}</b></span>`);
-    if (qty) facts.push(`<span>Qty<b>${escapeHtml(qty)}</b></span>`);
-    if (refdes) facts.push(`<span class="xfacts-refdes" title="${escapeHtml(refdes)}">Refdes<b>${escapeHtml(refdes)}</b></span>`);
-    if (facts.length) h += `<div class="xfacts">${facts.join('')}</div>`;
-
-    const canRemove = !!(item || state.fabernr);
-    // A suggestion, or a partial match Find IPN assigned itself, can be confirmed (it becomes Matched)
-    let acceptLabel = '';
-    if (item && !state.fabernr) acceptLabel = 'Accept suggestion';
-    else if (item && !state.sel.fabernr && state.status === 'partial') acceptLabel = 'Accept match';
-    h += '<div class="xcur-act">' +
-        (acceptLabel ? `<button type="button" class="btn btn-primary" data-act="accept">${panelIcon('check')}${acceptLabel}</button>` : '') +
-        `<button type="button" class="btn btn-danger" data-act="remove"${canRemove ? '' : ' disabled title="This line has no match"'}>${panelIcon('trash')}Remove match</button>` +
-        '</div>';
+    // No buttons on the card: Accept and remove (click ✓ In use) are in the candidate list
     return h;
 }
 
@@ -1529,12 +1500,14 @@ function klantCellHtml(item) {
 
 // The candidates in Find IPN's order, each with the parameter dots against the customer line
 // (as in the main table: value, tolerance, voltage, power, package)
-const PANEL_LIST_HEAD = '<thead><tr><th>FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>Mounting</th>' +
-    '<th>Status</th><th class="fx-num">Kostprijs</th><th class="fx-num">Voorraad</th><th>Klant</th>' +
-    '<th class="xparam" title="Value (Ω resistor, -||- capacitor, L coil)">Value</th><th class="xparam" title="Tolerance">%</th>' +
-    '<th class="xparam" title="Voltage">V</th><th class="xparam" title="Power">P</th><th class="xparam" title="Package">Package</th>' +
+// Compact enough for a 1080p screen at 125-150% scaling: mounting and a status other than
+// Actief sit next to the FaberNr, MPN and manufacturer share one column, the dots have symbols.
+const PANEL_LIST_HEAD = '<thead><tr><th>FaberNr</th><th>Omschrijving</th><th>MPN · Manufacturer</th>' +
+    '<th class="fx-num">Kostprijs</th><th class="fx-num">Voorraad</th><th>Klant</th>' +
+    '<th class="xparam" title="Value (Ω resistor, -||- capacitor, L coil)">Val</th><th class="xparam" title="Tolerance">%</th>' +
+    '<th class="xparam" title="Voltage">V</th><th class="xparam" title="Power">P</th><th class="xparam" title="Package">Pkg</th>' +
     '<th class="xact"><span class="xsr">Action</span></th></tr></thead>';
-const PANEL_LIST_COLS = 15;
+const PANEL_LIST_COLS = 12;
 
 function panelListHtml(rowIndex) {
     const message = (text) => `<table>${PANEL_LIST_HEAD}<tbody><tr class="xmsg"><td colspan="${PANEL_LIST_COLS}">${text}</td></tr></tbody></table>`;
@@ -1558,20 +1531,34 @@ function panelListHtml(rowIndex) {
     let body = '';
     list.forEach((s, k) => {
         const isCur = !!curNr && s.FaberNr === curNr;
-        const act = !isCur
-            ? `<button type="button" class="btn xuse" data-act="use" data-k="${k}">Use</button>`
-            : (curIsSugg ? '<span class="fx-badge fx-badge-steel">Suggestion</span>' : '<span class="fx-badge fx-badge-success">✓ In use</span>');
+        // The linked article: ✓ In use, click to remove it (Undo in the toast). A suggestion: Accept.
+        // A partial match Find IPN linked itself can also be confirmed (it becomes Matched).
+        let act;
+        if (!isCur) {
+            act = `<button type="button" class="btn xuse" data-act="use" data-k="${k}">Use</button>`;
+        } else if (curIsSugg) {
+            act = '<button type="button" class="btn btn-primary xuse" data-act="accept" title="Link this suggestion to the line">Accept</button>';
+        } else {
+            const confirm = state.status === 'partial' && !state.sel.fabernr
+                ? '<button type="button" class="btn xuse" data-act="accept" title="Confirm this match (it becomes Matched)">Accept</button>' : '';
+            act = confirm + '<button type="button" class="xinuse" data-act="remove" title="Linked to this line · click to remove it">' +
+                '<span class="xinuse-on">✓ In use</span><span class="xinuse-off">✕ Remove</span></button>';
+        }
         const oms = s.Omschrijving || '';
         const omsHtml = s._param_highlights && s._param_highlights.length ? applyHighlights(oms, s._param_highlights) : escapeHtml(oms);
         const cls = isCur ? ` class="is-cur${curIsSugg ? ' is-sugg' : ''}"` : '';
         const stockN = toNumber(s.Voorraad);
+        // A status other than Actief (Vervallen, Geblokkeerd) is worth a badge; Actief is the norm
+        const statusTxt = String(s.Status || '').trim();
+        const statusBadgeHtml = statusTxt && statusTxt.toLowerCase() !== 'actief' ? erpStatusBadge(statusTxt) : '';
+        const mpnCell = isBlank(s.MPN) && isBlank(s.Manufacturer) ? NIL :
+            (isBlank(s.MPN) ? '' : `<div class="fx-mono">${mpnHtml(s.MPN, customerMpn, 'xclip xclip-l')}</div>`) +
+            (isBlank(s.Manufacturer) ? '' : `<div class="xsub xclip xclip-l" title="${escapeHtml(s.Manufacturer)}">${escapeHtml(s.Manufacturer)}</div>`);
         body += `<tr${cls}>` +
-            `<td><span class="fnr">${escapeHtml(s.FaberNr || '')}</span>${renderPreviousBomCheck(s.FaberNr || '')}</td>` +
+            `<td><span class="xnr-cell"><span class="fnr">${escapeHtml(s.FaberNr || '')}</span>${renderPreviousBomCheck(s.FaberNr || '')}` +
+            `${isBlank(s.Mounting) ? '' : mountingBadge(s.Mounting)}${statusBadgeHtml}</span></td>` +
             `<td>${oms ? `<span class="xclip" title="${escapeHtml(oms)}">${omsHtml}</span>` : NIL}</td>` +
-            `<td>${isBlank(s.Manufacturer) ? NIL : `<span class="xclip xclip-m" title="${escapeHtml(s.Manufacturer)}">${escapeHtml(s.Manufacturer)}</span>`}</td>` +
-            `<td class="fx-mono">${isBlank(s.MPN) ? NIL : mpnHtml(s.MPN, customerMpn, 'xclip xclip-l')}</td>` +
-            `<td>${mountingBadge(s.Mounting)}</td>` +
-            `<td>${erpStatusBadge(s.Status)}</td>` +
+            `<td class="xmpn-cell">${mpnCell}</td>` +
             `<td class="fx-num fx-mono">${priceHtml(s.Kostprijs)}</td>` +
             `<td class="fx-num${stockN !== null && stockN > 0 ? ' fx-mono' : ''}">${stockHtml(s.Voorraad)}</td>` +
             klantCellHtml(s) +
