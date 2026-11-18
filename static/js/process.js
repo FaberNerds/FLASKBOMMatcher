@@ -1199,7 +1199,7 @@ async function useItem(rowIndex, item, how) {
 // Row selection and the row panel: click a line, a panel opens directly under it
 // ========================================================================
 
-// The open panel: { row, view: 'cands' | 'results', sort, results, shown, q, qmode, busy, failed, smode, input }
+// The open panel: { row, view: 'cands' | 'results', results, shown, q, qmode, busy, failed, smode, input }
 let panel = null;
 
 const PANEL_ICON_PATHS = {
@@ -1217,8 +1217,6 @@ function panelIcon(name) {
 
 const SEARCH_MODES = [['mpn', 'MPN'], ['ipn', 'IPN'], ['description', 'Description']];
 const SEARCH_MODE_LABELS = { mpn: 'MPN', ipn: 'IPN', description: 'Description' };
-const PANEL_SORTS = [['rank', 'Ranking'], ['score', 'Score'], ['cost', 'Kostprijs'], ['stock', 'Voorraad']];
-const PARAM_NAMES = ['Value', 'Tolerance', 'Voltage', 'Power', 'Package'];
 
 function rowEl(rowIndex) {
     return document.querySelector(`#matchTableBody tr[data-row="${rowIndex}"]`);
@@ -1266,7 +1264,7 @@ function openPanel(rowIndex) {
     if (!tr || tr.hidden) return;
     selectRow(rowIndex);
     panel = {
-        row: rowIndex, view: 'cands', sort: 'rank', results: [], shown: [],
+        row: rowIndex, view: 'cands', results: [], shown: [],
         q: '', qmode: '', busy: false, failed: false, smode: null, input: null,
     };
     mountPanel();
@@ -1319,65 +1317,160 @@ function renderPanel() {
     x.querySelector('.xsearch').innerHTML = panelSearchHtml(panel.row);
 }
 
-/** Up to two notes from the parameter indicators of the line: what differs, or that all checks match. */
-function paramNotes(rowIndex) {
-    const tr = rowEl(rowIndex);
-    if (!tr) return '';
+// ------------------------------------------------------------------------
+// Word underlines in the row panel (as BOM Compare): the customer description (A) and the ERP
+// Omschrijving (B) are split into words and normalised (case, decimal comma, 20K0 = 20k,
+// µ = u, SMD0402 = 0402, RES = Resistor...). A word in both lines gets the same colour on both
+// sides; similar part numbers a dashed amber line; parameter words without an exact partner
+// their category colour (voltage, tolerance, package, power); other words without a partner red.
+// ------------------------------------------------------------------------
+
+const TOKEN_MATCH_COLORS = ['#22c55e', '#3b82f6', '#ec4899', '#14b8a6', '#8b5cf6', '#0ea5e9', '#f97316'];
+const TOKEN_CATEGORY_COLORS = { voltage: '#f59e0b', tolerance: '#a855f7', package: '#06b6d4', power: '#84cc16' };
+const TOKEN_SYNONYMS = {
+    resistor: 'res', resistors: 'res', weerstand: 'res', weerst: 'res',
+    capacitor: 'cap', capacitors: 'cap', condensator: 'cap', cond: 'cap',
+    inductor: 'ind', inductors: 'ind', spoel: 'ind', coil: 'ind',
+    mosfet: 'fet', pmosfet: 'fet', nmosfet: 'fet',
+};
+const TOKEN_PACKAGES = /^(01005|0201|0402|0603|0805|1206|1210|1608|1616|1812|2010|2012|2220|2512|2520|sot-?\d+|sod-?\d+|qfn-?\d+|soic-?\d+|tssop-?\d+)$/;
+
+function descTokens(str) {
     const out = [];
-    let checked = false;
-    tr.querySelectorAll('td.pc').forEach((td, k) => {
-        const ind = td.querySelector('.param-indicator');
-        if (!ind) return;
-        if (!ind.classList.contains('param-na') && !ind.classList.contains('param-missing')) checked = true;
-        const tip = escapeHtml(String(ind.dataset.tip || ind.title || '').replace(' | ', ', '));
-        const name = PARAM_NAMES[k] || 'Parameter';
-        if (ind.classList.contains('param-diff')) {
-            out.push(`<div class="xnote is-bad" title="${tip}">✖ ${name} differs · ${tip}</div>`);
-        } else if (ind.classList.contains('param-acceptable')) {
-            out.push(`<div class="xnote is-warn" title="${tip}">⚠ ${name} · ${tip}</div>`);
-        }
+    String(str || '').split(/[\s;]+/).forEach(part => {
+        if (/^[±+\-/]*\d+,\d+\w*%?$/.test(part)) out.push(part);
+        else part.split(',').forEach(t => { if (t.trim()) out.push(t.trim()); });
     });
-    if (!out.length) {
-        out.push(checked
-            ? '<div class="xnote is-ok">✓ Checked parameters match</div>'
-            : '<div class="xnote">No parameters checked for this line</div>');
-    }
-    return out.slice(0, 2).join('');
+    return out.map(t => ({ text: t, norm: normalizeDescToken(t) }));
 }
 
+function normalizeDescToken(token) {
+    let t = token.toLowerCase().replace(/[.,:;()]+$/, '').replace(/^[(]+/, '').replace(/µ/g, 'u').replace(/[Ωω]/g, '');
+    t = t.replace(/(\d),(\d)/g, '$1.$2');
+    t = t.replace(/^(?:smd|case)(\d{4})$/, '$1');
+    t = t.replace(/^(\d+)k0+$/, '$1k').replace(/^(\d+)\.0+k$/, '$1k').replace(/^(\d+)k(\d+)$/, '$1.$2k');
+    t = t.replace(/^(\d+)m0+$/, '$1m').replace(/^(\d+)m(\d+)$/, '$1.$2m');
+    t = t.replace(/^(\d+)[er]$/, '$1').replace(/^(\d+)[er](\d+)$/, '$1.$2');
+    return TOKEN_SYNONYMS[t] || t;
+}
+
+function descTokenCategory(norm) {
+    if (/^[+-]?\d+(\.\d+)?k?v(dc|ac)?$/.test(norm) || /^[+-]?\d+(\.\d+)?mv$/.test(norm)) return 'voltage';
+    if (/%$/.test(norm) || /^±/.test(norm)) return 'tolerance';
+    if (TOKEN_PACKAGES.test(norm)) return 'package';
+    if (/^\d+(\.\d+)?m?w$/.test(norm) || /^\d+\/\d+w$/.test(norm)) return 'power';
+    return null;
+}
+
+/** Both descriptions as HTML with the word underlines: { a, b }. */
+function compareDescriptions(a, b) {
+    const ta = descTokens(a);
+    const tb = descTokens(b);
+    const shared = new Map();
+    let next = 0;
+    ta.forEach(t => {
+        if (!shared.has(t.norm) && tb.some(u => u.norm === t.norm)) {
+            shared.set(t.norm, TOKEN_MATCH_COLORS[next++ % TOKEN_MATCH_COLORS.length]);
+        }
+    });
+    const near = (t, other) => t.norm.length >= 5 && other.some(u => u.norm !== t.norm && u.norm.length >= 5 &&
+        (u.norm.startsWith(t.norm) || t.norm.startsWith(u.norm)));
+    const render = (tokens, other) => tokens.map(t => {
+        const text = escapeHtml(t.text);
+        const color = shared.get(t.norm);
+        if (color) return `<span class="tk" style="border-bottom-color:${color};background:${color}1f">${text}</span>`;
+        if (near(t, other)) return `<span class="tk tk-near">${text}</span>`;
+        const cat = descTokenCategory(t.norm);
+        if (cat) return `<span class="tk" style="border-bottom-color:${TOKEN_CATEGORY_COLORS[cat]}">${text}</span>`;
+        return `<span class="tk tk-miss">${text}</span>`;
+    }).join(' ');
+    return { a: render(ta, tb), b: render(tb, ta) };
+}
+
+const FACT_LABELS = {
+    resistor: 'Resistance', capacitor: 'Capacitance', inductor: 'Inductance', bead: 'Impedance',
+};
+const FACT_SIGNS = {
+    match: ['✓', 'is-ok', 'Same'], acceptable: ['↑', 'is-warn', 'Acceptable'], diff: ['≠', 'is-bad', 'Different'],
+    missing: ['–', 'is-muted', 'Not in both'],
+};
+
+/** The A | B facts table of a line against an ERP article (same comparison as the dots). */
+function panelFactsHtml(rowIndex, item) {
+    const row = (bomData.rows || [])[rowIndex] || {};
+    const mapping = bomData.column_mapping || {};
+    const customerDesc = getMappedValue(row, mapping.Description).replace(/<[^>]*>/g, '');
+    const erpDesc = String(item.Omschrijving || '').replace(/<[^>]*>/g, '');
+    const groupHint = bomData.row_types ? bomData.row_types[rowIndex] : undefined;
+    const p = extractParametersFromDescription(customerDesc, erpDesc, 1, groupHint);
+    const isCap = (p.value1 && /[pnuµ]F/i.test(p.value1)) || (p.value2 && /[pnuµ]F/i.test(p.value2));
+    const valueLabel = FACT_LABELS[p.kind] || (isCap ? FACT_LABELS.capacitor : (groupHint === 'resistor' ? FACT_LABELS.resistor : 'Value'));
+    const facts = [
+        [valueLabel, p.value1, p.value2, p.valueStatus],
+        ['Tolerance', p.tolerance1, p.tolerance2, p.toleranceStatus],
+        ['Voltage', p.voltage1, p.voltage2, p.voltageStatus],
+        ['Power', p.power1, p.power2, p.powerStatus],
+        ['Package', p.package1, p.package2, p.packageStatus],
+    ]
+        // Other parts (IC, transistor, diode...): only the package; their "35mR" is no resistance
+        .filter(([label]) => !(groupHint === 'other' && !p.kind) || label === 'Package')
+        .filter(([, a, b, status]) => status !== 'na' && (a || b));
+    if (!facts.length) return '<div class="xnote">No parameters to compare for this part</div>';
+    const rows = facts.map(([label, a, b, status]) => {
+        const [sign, cls, tip] = FACT_SIGNS[status] || FACT_SIGNS.missing;
+        return `<tr><td class="xf-label">${label}</td><td class="fx-mono">${a ? escapeHtml(a) : NIL}</td>` +
+            `<td class="fx-mono">${b ? escapeHtml(b) : NIL}</td><td class="xf-sign ${cls}" title="${tip}">${sign}</td></tr>`;
+    }).join('');
+    return '<table class="xfacts-tab"><thead><tr><th></th><th><span class="xab xab-a">A</span>BOM</th>' +
+        `<th><span class="xab xab-b">B</span>ERP</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+/** Left card of the row panel: the customer line (A) against the linked article or suggestion (B). */
 function panelCurrentHtml(rowIndex) {
     const state = getRowState(rowIndex);
     const item = currentItem(state);
     const n = rowIndex + 1;
-    let h = `<div class="xcur-top"><span class="xlabel">Current match</span>${statusBadge(state)}</div>`;
+    const row = (bomData.rows || [])[rowIndex] || {};
+    const mapping = bomData.column_mapping || {};
+    const customerDesc = getMappedValue(row, mapping.Description);
+    const customerMpn = getMappedValue(row, mapping.MPN).trim();
+    const isSugg = !!item && !state.fabernr;
+    const nr = state.fabernr || (item && item.FaberNr) || '';
 
-    if (item) {
-        const isSugg = !state.fabernr;
-        const nr = state.fabernr || item.FaberNr || '';
-        const nrHtml = isSugg
-            ? `<span class="sugg">${escapeHtml(nr)}</span><span class="fx-badge fx-badge-steel">Suggestion</span>`
-            : `<span class="fnr">${escapeHtml(nr)}</span>${renderPreviousBomCheck(nr)}`;
-        const meta = [item.Manufacturer, item.MPN].filter(v => !isBlank(v));
-        h += `<div class="xcur-nr">${nrHtml}${isBlank(item.Mounting) ? '' : mountingBadge(item.Mounting)}</div>` +
-            `<div class="xcur-oms" title="${escapeHtml(item.Omschrijving || '')}">${escapeHtml(item.Omschrijving || '—')}</div>` +
-            (meta.length ? `<div class="xcur-meta">${escapeHtml(item.Manufacturer || '—')} · <span class="fx-mono">${escapeHtml(item.MPN || '—')}</span></div>` : '') +
-            `<div class="xfacts"><span>Kostprijs<b>${priceHtml(item.Kostprijs)}</b></span><span>Voorraad<b>${stockHtml(item.Voorraad)}</b></span></div>` +
-            paramNotes(rowIndex);
-    } else if (state.fabernr) {
-        h += `<div class="xcur-nr"><span class="fnr">${escapeHtml(state.fabernr)}</span>${renderPreviousBomCheck(state.fabernr)}</div>` +
-            '<div class="xnone-text">Assigned by hand; the article details are not loaded.</div>';
-    } else {
-        let title = 'Not matched yet';
-        let text = 'Run Find IPN, or search the ERP by MPN, IPN or description below.';
-        if (state.status === 'deleted') {
-            title = 'Match removed';
-            text = `Row ${n} has no ERP article now. Use a candidate or search the ERP by MPN, IPN or description.`;
-        } else if (state.match) {
-            title = 'No match';
-            text = `Row ${n} has no ERP article. Use a candidate or search the ERP by MPN, IPN or description.`;
-        }
-        h += `<div class="xnone"><span class="xnone-title">${title}</span><span class="xnone-text">${text}</span></div>`;
+    let head = `<span class="xlabel">Row ${n}</span>`;
+    if (nr) {
+        head += isSugg
+            ? ` <span class="sugg">${escapeHtml(nr)}</span>`
+            : ` <span class="fnr">${escapeHtml(nr)}</span>${renderPreviousBomCheck(nr)}`;
     }
+    let h = `<div class="xcur-top"><span class="xcur-id">${head}</span>` +
+        `${isSugg ? '<span class="fx-badge fx-badge-steel">Suggestion</span>' : statusBadge(state)}</div>`;
+
+    const lines = compareDescriptions(customerDesc, item ? item.Omschrijving : '');
+    h += `<div class="xab-line"><span class="xab xab-a" title="Customer BOM">A</span><span class="xab-text">${customerDesc ? lines.a : NIL}</span></div>`;
+    if (item) {
+        h += `<div class="xab-line"><span class="xab xab-b" title="ERP">B</span><span class="xab-text">${item.Omschrijving ? lines.b : NIL}</span></div>` +
+            '<div class="xab-mpn">' +
+            `<span><span class="xab xab-a xab-sm">A</span><span class="fx-mono">${customerMpn ? escapeHtml(customerMpn) : NIL}</span></span>` +
+            `<span><span class="xab xab-b xab-sm">B</span>${isBlank(item.MPN) ? NIL : mpnHtml(item.MPN, customerMpn)}</span>` +
+            (isBlank(item.Mounting) ? '' : mountingBadge(item.Mounting)) + '</div>' +
+            panelFactsHtml(rowIndex, item);
+    } else if (state.fabernr) {
+        h += '<div class="xnone-text">Assigned by hand; the article details are not loaded.</div>';
+    } else {
+        let text = 'Not matched yet. Run Find IPN, or search the ERP by MPN, IPN or description.';
+        if (state.status === 'deleted') text = 'Match removed. Use a candidate or search the ERP by MPN, IPN or description.';
+        else if (state.match) text = 'No ERP article linked. Use a candidate or search the ERP by MPN, IPN or description.';
+        h += `<div class="xnone-text">${text}</div>`;
+    }
+
+    const qty = getMappedValue(row, mapping.Quantity).trim();
+    const refdes = getMappedValue(row, mapping.Refdes).trim();
+    const facts = [];
+    if (item) facts.push(`<span>Kostprijs<b>${priceHtml(item.Kostprijs)}</b></span>`, `<span>Voorraad<b>${stockHtml(item.Voorraad)}</b></span>`);
+    if (qty) facts.push(`<span>Qty<b>${escapeHtml(qty)}</b></span>`);
+    if (refdes) facts.push(`<span class="xfacts-refdes" title="${escapeHtml(refdes)}">Refdes<b>${escapeHtml(refdes)}</b></span>`);
+    if (facts.length) h += `<div class="xfacts">${facts.join('')}</div>`;
 
     const canRemove = !!(item || state.fabernr);
     // A suggestion, or a partial match Find IPN assigned itself, can be confirmed (it becomes Matched)
@@ -1400,18 +1493,6 @@ function panelCandidates(rowIndex) {
     return list;
 }
 
-function sortCandidates(list, key) {
-    if (key === 'rank') return list.slice();
-    const value = (s) => {
-        if (key === 'score') { const v = toNumber(s._similarity_score); return v === null ? -Infinity : -v; }
-        if (key === 'cost') { const v = toNumber(s.Kostprijs); return v ? v : Infinity; }
-        const v = toNumber(s.Voorraad); return v === null ? Infinity : -v;  // stock: most first
-    };
-    return list.map((s, k) => ({ s, k, v: value(s) }))
-        .sort((a, b) => (a.v === b.v ? a.k - b.k : (a.v < b.v ? -1 : 1)))
-        .map(x => x.s);
-}
-
 function panelHeadHtml(rowIndex) {
     let h;
     if (panel.view === 'results') {
@@ -1422,28 +1503,38 @@ function panelHeadHtml(rowIndex) {
     } else {
         const count = panelCandidates(rowIndex).length;
         h = `<span class="xtitle">Candidates for row ${rowIndex + 1}</span><span class="fx-badge fx-badge-neutral fx-badge-mono">${count}</span>` +
-            (count > 1 ? '<span class="xrule">Ranking as found by Find IPN</span>' : '') + '<span class="xgrow"></span>';
-        if (count > 1) {
-            h += '<div class="xseg" role="group" aria-label="Sort candidates">' + PANEL_SORTS.map(([key, label]) =>
-                `<button type="button" data-act="sort" data-sort="${key}" aria-pressed="${panel.sort === key}">${label}</button>`
-            ).join('') + '</div>';
-        }
+            '<span class="xgrow"></span>';
     }
     h += `<button type="button" class="btn btn-ghost xsmall xclose" data-act="close" title="Close (Esc)">${panelIcon('close')}Close</button>`;
     return h;
 }
 
-function scoreHtml(s) {
-    const v = toNumber(s._similarity_score);
-    if (v === null) return NIL;
-    const pct = Math.max(0, Math.min(100, Math.round(v)));
-    return `<span class="xscore"><span class="xscore-bar"><i style="width:${pct}%"></i></span><span class="xscore-pct">${pct}%</span></span>`;
+/**
+ * The customer an ERP article belongs to (KlantNaam + KlantNr). Klant 0 is general stock (grey);
+ * the customer of this BOM gets a green line, another customer an amber one.
+ */
+function klantCellHtml(item) {
+    const nr = String(item.KlantNr === undefined || item.KlantNr === null ? '' : item.KlantNr).trim();
+    const name = String(item.KlantNaam || '').trim();
+    if (!nr && !name) return `<td>${NIL}</td>`;
+    if (nr === '0' || !nr) {
+        return `<td class="xklant" title="General stock"><span class="xklant-general">Algemeen</span> <span class="xknr">${escapeHtml(nr || '0')}</span></td>`;
+    }
+    const bomKlant = String((bomData && bomData.klant_nr) || '').trim();
+    const same = bomKlant && nr === bomKlant;
+    const cls = bomKlant ? (same ? ' is-same' : ' is-other') : '';
+    const tip = `${name} · ${nr}${bomKlant ? (same ? ' · customer of this BOM' : ' · another customer') : ''}`;
+    return `<td class="xklant${cls}" title="${escapeHtml(tip)}"><span class="xclip xclip-m">${escapeHtml(name || '—')}</span> <span class="xknr">${escapeHtml(nr)}</span></td>`;
 }
 
+// The candidates in Find IPN's order, each with the parameter dots against the customer line
+// (as in the main table: value, tolerance, voltage, power, package)
 const PANEL_LIST_HEAD = '<thead><tr><th>FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>Mounting</th>' +
-    '<th>Status</th><th class="fx-num">Kostprijs</th><th class="fx-num">Voorraad</th><th>Score</th>' +
+    '<th>Status</th><th class="fx-num">Kostprijs</th><th class="fx-num">Voorraad</th><th>Klant</th>' +
+    '<th class="xparam" title="Value (Ω resistor, -||- capacitor, L coil)">Value</th><th class="xparam" title="Tolerance">%</th>' +
+    '<th class="xparam" title="Voltage">V</th><th class="xparam" title="Power">P</th><th class="xparam" title="Package">Package</th>' +
     '<th class="xact"><span class="xsr">Action</span></th></tr></thead>';
-const PANEL_LIST_COLS = 10;
+const PANEL_LIST_COLS = 15;
 
 function panelListHtml(rowIndex) {
     const message = (text) => `<table>${PANEL_LIST_HEAD}<tbody><tr class="xmsg"><td colspan="${PANEL_LIST_COLS}">${text}</td></tr></tbody></table>`;
@@ -1451,7 +1542,7 @@ function panelListHtml(rowIndex) {
         return message(`Searching the ERP by ${escapeHtml(SEARCH_MODE_LABELS[panel.qmode] || '')} for “${escapeHtml(panel.q)}”...`);
     }
     const state = getRowState(rowIndex);
-    const list = panel.view === 'results' ? panel.results : sortCandidates(panelCandidates(rowIndex), panel.sort);
+    const list = panel.view === 'results' ? panel.results : panelCandidates(rowIndex);
     panel.shown = list;
     if (!list.length) {
         if (panel.view === 'results') {
@@ -1483,7 +1574,8 @@ function panelListHtml(rowIndex) {
             `<td>${erpStatusBadge(s.Status)}</td>` +
             `<td class="fx-num fx-mono">${priceHtml(s.Kostprijs)}</td>` +
             `<td class="fx-num${stockN !== null && stockN > 0 ? ' fx-mono' : ''}">${stockHtml(s.Voorraad)}</td>` +
-            `<td>${scoreHtml(s)}</td>` +
+            klantCellHtml(s) +
+            buildParamCellsFor(rowIndex, s) +
             `<td class="xact">${act}</td></tr>`;
     });
     return `<table>${PANEL_LIST_HEAD}<tbody>${body}</tbody></table>`;
@@ -1581,10 +1673,6 @@ function onPanelClick(e) {
             useItem(rowIndex, item, how);
             break;
         }
-        case 'sort':
-            panel.sort = btn.dataset.sort;
-            renderPanel();
-            break;
         case 'smode': {
             panel.smode = btn.dataset.mode;
             panel.input = customerSearchValue(rowIndex, panel.smode);

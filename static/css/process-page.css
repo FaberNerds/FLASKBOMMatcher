@@ -837,7 +837,7 @@ body.col-resizing * {
     left: 0;
     box-sizing: border-box;
     display: grid;
-    grid-template-columns: 296px minmax(0, 1fr);
+    grid-template-columns: 400px minmax(0, 1fr);
     gap: 14px;
     padding: 12px 16px 14px 19px;
     box-shadow: inset 3px 0 0 var(--steel);
@@ -882,26 +882,148 @@ body.col-resizing * {
     cursor: help;
 }
 
-.xcur-nr {
-    display: flex;
+/* Row 68 · 35439700 */
+.xcur-id {
+    display: inline-flex;
     align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.match-table .xcur-id .fnr,
+.match-table .xcur-id .sugg {
+    font-size: 13px;
+}
+
+/* A (customer BOM) and B (ERP) lines, as the tooltip of BOM Compare */
+.xab-line {
+    display: flex;
+    align-items: flex-start;
     gap: 8px;
-    min-height: 20px;
 }
 
-.match-table .xcur-nr .fnr,
-.match-table .xcur-nr .sugg {
-    font-size: 14px;
+.xab-text {
+    min-width: 0;
+    line-height: 22px;
+    font-weight: 500;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
-.xcur-oms {
-    font-weight: 600;
+.xab {
+    display: inline-grid;
+    place-items: center;
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 2px;
+    border-radius: var(--radius-sm);
+    font-size: 10px;
+    line-height: 1;
+    font-weight: 700;
+}
+
+.xab-a { background: var(--sky-soft); color: var(--sky); }
+.xab-b { background: var(--steel-soft); color: var(--steel); }
+
+.xab-sm {
+    width: 16px;
+    height: 16px;
+    margin: 0 5px 0 0;
+    vertical-align: -3px;
+}
+
+.xab-mpn {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 14px;
+    font-size: 12px;
+}
+
+.xab-mpn .fx-mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+/* Word underlines: a word in both lines has the same colour on both sides */
+.match-table .tk {
+    padding: 0 2px;
+    border-radius: 2px;
+    border-bottom: 3px solid transparent;
+}
+
+.match-table .tk-near {
+    border-bottom: 3px dashed #e0a12c;
+}
+
+.match-table .tk-miss {
+    color: var(--danger);
+}
+
+/* A | B facts table with a sign per parameter */
+.match-table .xfacts-tab {
+    width: 100%;
+    border: 1px solid var(--sheet-edge);
+    border-radius: 10px;
+    border-collapse: separate;
+    border-spacing: 0;
+    overflow: hidden;
+    font-size: 12px;
+}
+
+.match-table .xfacts-tab th,
+.match-table .xfacts-tab td {
+    position: static;
+    height: 24px;
+    padding: 2px 8px;
+    background: var(--surface-raised);
+    border-left: 0;
+    border-bottom: 1px solid var(--sheet-row);
     white-space: nowrap;
+}
+
+.match-table .xfacts-tab th {
+    background: var(--sheet-head);
+    font-size: 11px;
+    border-bottom-color: var(--sheet-edge);
+}
+
+.match-table .xfacts-tab th .xab {
+    width: 16px;
+    height: 16px;
+    margin: 0 5px 0 0;
+    vertical-align: -3px;
+}
+
+.match-table .xfacts-tab tr:last-child td {
+    border-bottom: 0;
+}
+
+.match-table .xfacts-tab .xf-label {
+    color: var(--ink-muted);
+}
+
+.match-table .xfacts-tab .xf-sign {
+    width: 1%;
+    text-align: center;
+    font-weight: 700;
+    cursor: help;
+}
+
+.xf-sign.is-ok { color: var(--success); }
+.xf-sign.is-warn { color: var(--warning); }
+.xf-sign.is-bad { color: var(--danger); }
+.xf-sign.is-muted { color: var(--ink-muted); }
+
+.xfacts-refdes {
+    min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
-.xcur-meta,
 .xnote {
     font-size: 12px;
     line-height: 16px;
@@ -935,9 +1057,6 @@ body.col-resizing * {
     font-variant-numeric: tabular-nums;
 }
 
-.xnote.is-bad { color: var(--danger); }
-.xnote.is-warn { color: var(--warning); }
-.xnote.is-ok { color: var(--success); }
 
 .xnone {
     display: flex;
@@ -1160,6 +1279,39 @@ body.col-resizing * {
 }
 
 .xclip-m { max-width: 118px; }
+
+/* Customer of a candidate article: Algemeen 0, or the name + number; green = this BOM's customer */
+.match-table .xmini td.xklant {
+    white-space: nowrap;
+}
+
+.xklant .xclip {
+    display: inline-block;
+    vertical-align: bottom;
+    max-width: 150px;
+}
+
+.xklant-general {
+    color: var(--ink-muted);
+}
+
+.xknr {
+    margin-left: 2px;
+    padding: 0 5px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-sunken);
+    color: var(--ink-muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.match-table .xmini td.xklant.is-same {
+    box-shadow: inset 0 -3px 0 var(--success);
+}
+
+.match-table .xmini td.xklant.is-other {
+    box-shadow: inset 0 -3px 0 #e0a12c;
+}
 .xclip-l { max-width: 170px; }
 
 .xpanel .btn.xuse {
@@ -1169,33 +1321,13 @@ body.col-resizing * {
     font-size: 12px;
 }
 
-.xscore {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.xscore-bar {
-    width: 36px;
-    height: 6px;
-    border-radius: 3px;
-    background: var(--sheet-row);
-    overflow: hidden;
-}
-
-.xscore-bar > i {
-    display: block;
-    height: 100%;
-    border-radius: 3px;
-    background: var(--steel);
-}
-
-.xscore-pct {
-    min-width: 30px;
-    text-align: right;
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
+/* Parameter dots per candidate (as the Params columns of the main table) */
+.match-table .xmini th.xparam,
+.match-table .xmini td.pc {
+    width: 1%;
+    padding-left: 4px;
+    padding-right: 4px;
+    text-align: center;
 }
 
 .xsr {
@@ -1266,7 +1398,7 @@ body.col-resizing * {
 
 @media (max-width: 1360px) {
     .xpanel {
-        grid-template-columns: 264px minmax(0, 1fr);
+        grid-template-columns: 360px minmax(0, 1fr);
         gap: 12px;
         padding-right: 12px;
     }
