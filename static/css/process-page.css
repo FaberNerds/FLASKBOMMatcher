@@ -601,19 +601,48 @@
     font-size: 11px;
 }
 
-/* Description resize handle (both description columns share the width) */
-.match-table thead th.desc-th {
-    position: sticky;
+/* Column widths set by the user (process.js applyColumnWidths): the columns are fixed; the
+   columns the user sized cut their text with "..." (rules in #cutColumnsStyle, full text in the
+   title). Without any user width the table keeps its natural layout. */
+.match-table.fixed-cols {
+    table-layout: fixed;
 }
 
+/* Column resize handle: the right border of every column header (the sticky th is its anchor) */
 .match-table .col-resize-handle {
     position: absolute;
     top: 0;
-    right: -2px;
+    right: 0;
     bottom: 0;
-    width: 5px;
+    width: 7px;
     cursor: col-resize;
     z-index: 3;
+}
+
+.match-table .col-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 5px;
+    bottom: 5px;
+    right: 0;
+    width: 2px;
+    border-radius: 1px;
+    background: transparent;
+}
+
+.match-table thead th:hover .col-resize-handle::after {
+    background: var(--line-control);
+}
+
+.match-table .col-resize-handle:hover::after,
+.match-table .col-resize-handle.active::after {
+    background: var(--steel);
+}
+
+body.col-resizing,
+body.col-resizing * {
+    cursor: col-resize !important;
+    user-select: none;
 }
 
 /* ========================================
