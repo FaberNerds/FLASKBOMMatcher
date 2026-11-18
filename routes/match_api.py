@@ -23,6 +23,18 @@ logger = logging.getLogger(__name__)
 match_bp = Blueprint('match', __name__)
 
 
+def _forget_picked_parts(selections: dict, only_row: str = None) -> dict:
+    """Selections without the FaberNr picked by hand (MPNfree choices stay); empty rows dropped."""
+    out = {}
+    for idx, sel in (selections or {}).items():
+        sel = dict(sel or {})
+        if only_row is None or idx == only_row:
+            sel.pop('fabernr', None)
+        if sel:
+            out[idx] = sel
+    return out
+
+
 @match_bp.route('/match/find-ipn', methods=['POST'])
 def find_ipn():
     """Batch find IPN for all BOM rows."""
@@ -74,22 +86,26 @@ def find_ipn():
         matches_dict = {}
         for r in results:
             matches_dict[str(r['row_index'])] = r
-        # Articles picked by hand keep their details (the results are changed in place)
-        keep_selected_articles(matches_dict, load_selections() or {})
-
         save_matches(matches_dict)
+
+        # Find IPN starts over: the parts picked by hand before are forgotten (the MPNfree
+        # choices stay, they are an input of the search). Only Find IPN's own result counts.
+        selections = _forget_picked_parts(load_selections() or {})
+        save_selections(selections)
 
         # Update history entry with match state
         session_id = get_session_id()
         save_to_history(session_id, bom_data.get('name', ''), bom_data.get('klant_nr', ''))
 
-        matched = sum(1 for r in results if r['confidence'] != 'none')
-        param_matched = sum(1 for r in results if r.get('search_method') == 'parameterized')
+        # Matched = a part is linked; a suggestion alone is no match
+        matched = sum(1 for r in results if r.get('auto_selected'))
+        param_matched = sum(1 for r in results if r.get('search_method') == 'parameterized' and r.get('auto_selected'))
         logger.info(f"=== IPN SEARCH DONE === {matched}/{len(results)} rows matched ({param_matched} parameterized)")
 
         return jsonify({
             'success': True,
             'results': results,
+            'selections': selections,
             'matched': matched,
             'total': len(results),
             'parameterized': param_matched
@@ -143,13 +159,14 @@ def find_ipn_single_route():
 
         logger.info(f"Row {row_index} result: {result['search_method']}, {result['confidence']}, {len(result['suggestions'])} suggestions")
 
-        # Update stored matches; an article picked by hand keeps its details
-        keep_selected_articles({str(row_index): result}, {str(row_index): sel})
+        # Update stored matches; as Find IPN, the row starts over (a part picked by hand is forgotten)
         matches = load_matches() or {}
         matches[str(row_index)] = result
         save_matches(matches)
+        selections_data = _forget_picked_parts(selections_data, only_row=str_idx)
+        save_selections(selections_data)
 
-        return jsonify({'success': True, 'result': result})
+        return jsonify({'success': True, 'result': result, 'selection': selections_data.get(str_idx)})
     except Exception as e:
         logger.error(f"find_ipn_single error: {e}")
         return jsonify({'error': f'Search failed: {str(e)}'}), 500

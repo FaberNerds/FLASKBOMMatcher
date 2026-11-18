@@ -104,3 +104,24 @@ def test_bom_data_gives_type_and_refdes_number_per_line(client, monkeypatch):
     data = client.get('/api/bom-data').get_json()
     assert data['row_types'] == ['inductor', 'capacitor', 'resistor', 'other']
     assert data['row_refdes_num'] == [3, 3, None, 1]
+
+
+def test_find_ipn_starts_over(client, store, monkeypatch):
+    """Find IPN forgets the parts picked by hand (MPNfree choices stay); a suggestion alone
+    (another MPN) is not counted as a match."""
+    store['selections'] = {'0': {'fabernr': '62098900', 'mpnfree': True}, '1': {'fabernr': '311488'}}
+    results = [
+        {'row_index': 0, 'search_method': 'mpn', 'confidence': 'medium', 'suggestions': [{'FaberNr': '35585000'}],
+         'auto_selected': None, 'display_suggestion': {'FaberNr': '35585000'}},
+        {'row_index': 1, 'search_method': 'mpn', 'confidence': 'high', 'suggestions': [{'FaberNr': '304880'}],
+         'auto_selected': {'FaberNr': '304880'}},
+    ]
+    monkeypatch.setattr(match_api, 'find_ipn_batch', lambda *a, **k: results)
+    monkeypatch.setattr(match_api, 'load_mpnfree', lambda: {})
+    monkeypatch.setattr(match_api, 'save_to_history', lambda *a, **k: None)
+
+    data = client.post('/api/match/find-ipn', json={}).get_json()
+    assert store['selections'] == {'0': {'mpnfree': True}}
+    assert data['selections'] == {'0': {'mpnfree': True}}
+    assert data['matched'] == 1
+    assert store['matches']['0']['auto_selected'] is None
