@@ -8,7 +8,8 @@ so leftover/dead stock is avoided.
 
 Strategy per new BOM row:
   1. MPN fuzzy match: normalize the MPN and gate on the first 5 chars, then rank the
-     old-BOM candidates by string similarity. A hit is a confident match.
+     old-BOM candidates by string similarity. Only an identical MPN is assigned
+     automatically; other MPN hits are suggestions (the user picks them by hand).
   2. Generic R/C parameter match: for resistors/capacitors/elcos with no MPN match,
      extract parameters and score against old-BOM generic parts of the same category,
      reusing the existing parameter scorer.
@@ -25,6 +26,7 @@ from difflib import SequenceMatcher
 from typing import Dict, List, Any
 
 from services.match_service import _get_mapped_value
+from services.mpn_normalize_service import mpn_identical
 from services.category_detect_service import detect_category, is_generic_rc
 from services.param_extract_service import (
     extract_parameters, get_mpn_highlights, get_match_highlights,
@@ -139,8 +141,10 @@ def _match_one(mpn: str, desc: str, mfr: str, old_parts: List[Dict]) -> Dict[str
     if norm_mpn:
         cands = _mpn_candidates(norm_mpn, mfr, old_parts)
         if cands:
+            fns = {fn for fn, _score in cands}
+            old_mpns = {p['FaberNr']: p['MPN'] for p in old_parts if p['FaberNr'] in fns}
             return {'method': 'previous_mpn', 'category': '', 'q_params': {},
-                    'mpn': mpn, 'cands': cands}
+                    'mpn': mpn, 'cands': cands, 'old_mpns': old_mpns}
 
     cat = detect_category(desc)
     if cat and is_generic_rc(cat):
@@ -208,10 +212,21 @@ def _build_result(row_index: int, row: Dict, mapping: Dict, cand: Dict,
     top = suggestions[0]
 
     if method == 'previous_mpn':
-        # A 5-char-gated MPN match against the old BOM is a confident reuse.
-        result['confidence'] = 'high'
-        result['auto_selected'] = top
-        result['display_suggestion'] = top
+        # Only an identical MPN (on the old BOM or in the ERP) is reused automatically.
+        # A fuzzy MPN match (same first characters, other suffix) is a suggestion only.
+        old_mpns = cand.get('old_mpns', {})
+        same = next((s for s in suggestions
+                     if mpn_identical(s.get('MPN', ''), mpn)
+                     or mpn_identical(old_mpns.get(str(s.get('FaberNr', '')).strip(), ''), mpn)), None)
+        if same is not None:
+            suggestions.remove(same)
+            suggestions.insert(0, same)
+            result['confidence'] = 'high'
+            result['auto_selected'] = same
+            result['display_suggestion'] = same
+        else:
+            result['confidence'] = 'medium'
+            result['display_suggestion'] = top
     else:  # previous_param
         top_score = top.get('_similarity_score', 0)
         if top_score >= PARAM_HIGH:
