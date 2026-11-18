@@ -2,118 +2,59 @@
 
 {% block title %}BOM Matcher - Process{% endblock %}
 
-{% block topbar_actions %}
-<div style="display: flex; gap: 8px;">
-    <a href="/?back=1" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">&lt;&lt; Back</a>
-    <a href="/settings" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">Settings</a>
-</div>
+{% block extra_styles %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/process-page.css') }}">
 {% endblock %}
 
 {% block content %}
-<!-- Toolbar -->
-<div class="toolbar" style="display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; align-items: center;">
-    <h2 style="margin: 0; font-size: 18px; flex: 1;">
-        BOM: <span id="bomName" style="color: var(--color-primary);"></span>
-        <span id="bomStats" style="color: var(--text-muted); font-size: 13px; margin-left: 8px;"></span>
-    </h2>
-    <button class="btn btn-outline" id="selectMpnfreeBtn" onclick="selectMpnfree()">Select MPNfree</button>
-    <button class="btn btn-primary" onclick="findIpn()">Find IPN</button>
-    <button class="btn btn-outline" id="copyModeBtn" onclick="toggleCopyMode()">Copy: OFF</button>
-    <button class="btn btn-outline" id="deleteModeBtn" onclick="toggleDeleteMode()">Delete: OFF</button>
-    <button class="btn btn-outline" onclick="exportBom()">Export</button>
-    <div style="display: flex; align-items: center; gap: 4px; margin-left: 8px; border-left: 1px solid var(--border-color); padding-left: 8px;">
-        <button class="btn btn-outline btn-sm" onclick="adjustZoom(-5)" title="Zoom out" style="padding: 2px 6px; min-width: 24px;">-</button>
-        <span id="zoomLevel" style="font-size: 11px; color: var(--text-muted); min-width: 32px; text-align: center; cursor: pointer;" onclick="resetZoom()" title="Click to reset">100%</span>
-        <button class="btn btn-outline btn-sm" onclick="adjustZoom(5)" title="Zoom in" style="padding: 2px 6px; min-width: 24px;">+</button>
+<div class="match-page">
+    <!-- Header: Back, file name and customer left; the five actions right, on one line -->
+    <section class="match-head">
+        <div class="match-title">
+            <a href="/?back=1" class="btn btn-ghost match-back" title="Back to upload and column mapping">{{ icon('back') }}Back</a>
+            <span class="match-vsep" aria-hidden="true"></span>
+            <h1 class="fx-heading" id="bomName"></h1>
+            <span class="fx-badge fx-badge-gold fx-badge-pill klant-pill" id="klantPill" hidden></span>
+        </div>
+        <div class="match-actions" role="toolbar" aria-label="Match actions">
+            <button class="btn" type="button" id="selectMpnfreeBtn" onclick="selectMpnfree()">{{ icon('check') }}Select MPNfree</button>
+            <button class="btn btn-primary" type="button" id="findIpnBtn" onclick="findIpn()">{{ icon('search') }}Find IPN</button>
+            <span class="match-vsep" aria-hidden="true"></span>
+            <button class="btn btn-toggle" type="button" id="copyModeBtn" aria-pressed="false" onclick="toggleCopyMode()">{{ icon('copy') }}<span class="tlabel">Copy: OFF</span></button>
+            <button class="btn btn-toggle" type="button" id="deleteModeBtn" aria-pressed="false" onclick="toggleDeleteMode()">{{ icon('trash') }}<span class="tlabel">Delete: OFF</span></button>
+            <span class="match-vsep" aria-hidden="true"></span>
+            <button class="btn" type="button" id="exportBtn" onclick="exportBom()">{{ icon('export') }}Export</button>
+        </div>
+    </section>
+
+    <!-- Slim glass filter bar: search, status chips, mode hint -->
+    <section class="match-filter fx-glass" aria-label="Search and filter">
+        <label class="match-search">
+            {{ icon('search') }}
+            <input type="search" id="searchInput" placeholder="Search description, MPN, FaberNr or refdes"
+                   oninput="filterTable()" aria-label="Search lines" autocomplete="off">
+        </label>
+        <span class="match-vsep" aria-hidden="true"></span>
+        <div class="match-fgroup">
+            <span class="match-fgroup-label" id="statusLabel">Status</span>
+            <div class="fx-chips" role="group" aria-labelledby="statusLabel" id="statusChips">
+                <button class="fx-chip" type="button" aria-pressed="true" data-filter="all">All</button>
+                <button class="fx-chip" type="button" aria-pressed="false" data-filter="matched">Matched</button>
+                <button class="fx-chip" type="button" aria-pressed="false" data-filter="partial">Partial</button>
+                <button class="fx-chip" type="button" aria-pressed="false" data-filter="nomatch">No match</button>
+            </div>
+        </div>
+        <span class="mode-hint" id="modeHint" role="status" hidden><span class="mark" aria-hidden="true"></span><span id="modeText"></span></span>
+    </section>
+
+    <!-- One white sheet: customer BOM, ERP match and parameters in one table -->
+    <div class="match-sheet" id="matchSheet">
+        <table class="match-table" id="matchTable">
+            <thead id="matchTableHead"></thead>
+            <tbody id="matchTableBody"></tbody>
+        </table>
     </div>
 </div>
-
-<!-- Summary Badges -->
-<div id="summaryBadges" style="display: none; margin-bottom: 12px;">
-    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-        <div class="summary-badge summary-badge-green">
-            <span class="summary-badge-count" id="matchedCount">0</span>
-            <span class="summary-badge-label">Matched</span>
-        </div>
-        <div class="summary-badge summary-badge-yellow">
-            <span class="summary-badge-count" id="partialCount">0</span>
-            <span class="summary-badge-label">Partial</span>
-        </div>
-        <div class="summary-badge summary-badge-red">
-            <span class="summary-badge-count" id="noMatchCount">0</span>
-            <span class="summary-badge-label">No match</span>
-        </div>
-        <div class="summary-badge summary-badge-blue" id="paramBadge" style="display: none;">
-            <span class="summary-badge-count" id="paramCount">0</span>
-            <span class="summary-badge-label">Parameterized</span>
-        </div>
-    </div>
-</div>
-
-<!-- Search/Filter Bar -->
-<div id="filterBar" style="display: none; margin-bottom: 12px;">
-    <div style="display: flex; gap: 8px; align-items: center;">
-        <input type="text" class="form-input" id="searchInput" placeholder="Search..."
-               oninput="filterTable()" style="flex: 1; max-width: 300px;">
-        <select class="form-select" id="statusFilter" onchange="filterTable()" style="width: auto;">
-            <option value="all">All status</option>
-            <option value="matched">Matched</option>
-            <option value="partial">Partial</option>
-            <option value="nomatch">No match</option>
-        </select>
-    </div>
-</div>
-
-<!-- Split Panel Layout -->
-<div class="split-panel" id="splitPanel">
-    <!-- Left Panel: Customer BOM -->
-    <div class="split-panel-left">
-        <div class="split-panel-header">Customer BOM</div>
-        <div class="split-panel-scroll" id="leftScroll">
-            <table class="data-table" id="leftTable">
-                <thead id="leftTableHead"></thead>
-                <tbody id="leftTableBody"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Divider -->
-    <div class="split-panel-divider"></div>
-
-    <!-- Right Panel: ERP Matches -->
-    <div class="split-panel-right">
-        <div class="split-panel-header">ERP Matches</div>
-        <div class="split-panel-scroll" id="rightScroll">
-            <table class="data-table" id="rightTable">
-                <thead id="rightTableHead"></thead>
-                <tbody id="rightTableBody"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Divider -->
-    <div class="split-panel-divider"></div>
-
-    <!-- Params Panel -->
-    <div class="split-panel-params" id="paramsPanel">
-        <div class="split-panel-header">Params <span class="params-stats" id="paramsStats">0</span></div>
-        <div class="split-panel-scroll" id="paramsScroll">
-            <table class="params-table" id="paramsTable">
-                <thead>
-                    <tr>
-                        <th title="Value">Ω/-||-</th>
-                        <th title="Tolerance">%</th>
-                        <th title="Voltage">V</th>
-                        <th title="Power">P</th>
-                        <th title="Package">📦</th>
-                    </tr>
-                </thead>
-                <tbody id="paramsTableBody"></tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
 {% endblock %}
 
 {% block extra_scripts %}

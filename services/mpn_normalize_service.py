@@ -121,7 +121,7 @@ def search_with_variants(
                 if fnr and fnr not in seen_fabernr:
                     seen_fabernr.add(fnr)
                     hit['_search_variant'] = variant
-                    hit['_exact_match'] = (variant.upper() == mpn.upper())
+                    hit['_exact_match'] = mpn_identical(hit.get('MPN', ''), mpn)
                     results.append(hit)
         except Exception as e:
             logger.warning(f"Variant search failed for '{variant}': {e}")
@@ -133,6 +133,16 @@ def search_with_variants(
 def _normalize_for_comparison(s: str) -> str:
     """Strip all whitespace and normalize to uppercase for comparison."""
     return re.sub(r'\s+', '', s).upper()
+
+
+def mpn_identical(a: str, b: str) -> bool:
+    """True when two MPNs are the same part number: equal apart from case and whitespace.
+
+    Only an identical MPN may be assigned automatically by Find IPN; a longer or shorter
+    MPN (packaging suffix, -TR, variant) is shown as a suggestion only.
+    """
+    na = _normalize_for_comparison(a or '')
+    return bool(na) and na == _normalize_for_comparison(b or '')
 
 
 def search_with_variants_batched(
@@ -159,8 +169,6 @@ def search_with_variants_batched(
         return []
 
     # Deduplicate by FaberNr and tag with variant/exact_match info
-    mpn_upper = mpn.upper()
-    mpn_normalized = _normalize_for_comparison(mpn)
     seen_fabernr = set()
     results = []
 
@@ -172,20 +180,16 @@ def search_with_variants_batched(
 
         # Determine which variant matched this hit
         hit_mpn = (hit.get('MPN', '') or '').upper()
-        hit_mpn_normalized = _normalize_for_comparison(hit.get('MPN', '') or '')
         matched_variant = mpn  # default
-        is_exact = False
         for variant in variants:
             if variant.upper() in hit_mpn:
                 matched_variant = variant
-                if variant.upper() == mpn_upper:
-                    is_exact = True
                 break
 
-        # Also treat as exact if the normalized MPNs match
-        # (handles whitespace-only differences like "TB(LF)" vs "TB (LF)")
-        if not is_exact and hit_mpn_normalized == mpn_normalized:
-            is_exact = True
+        # Exact only when the ERP MPN IS the BOM MPN (case and whitespace aside, e.g.
+        # "TB(LF)" vs "TB (LF)"). The search is a LIKE '%mpn%', so a hit that merely
+        # contains the BOM MPN ("...-TR", "...,215") is not exact: suggestion only.
+        is_exact = mpn_identical(hit.get('MPN', ''), mpn)
 
         hit['_search_variant'] = matched_variant
         hit['_exact_match'] = is_exact

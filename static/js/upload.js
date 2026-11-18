@@ -1,6 +1,8 @@
 /**
  * BOM Matcher - Upload Page JavaScript
- * Handles file upload, sheet/header selection, row range, column mapping, and navigation.
+ * The page is a stepper in three steps: 1 Load file, 2 Rows, 3 Map and match.
+ * Handles file upload, sheet/header selection, row range, column mapping, customer,
+ * the previous version from Exact, and navigation to the Process page.
  */
 
 const standardColumns = ['Manufacturer', 'MPN', 'Description', 'Quantity', 'Refdes'];
@@ -10,13 +12,198 @@ let currentRows = [];
 // Customer selection state
 let allKlanten = [];
 let selectedKlantNr = '';
+let selectedKlantNaam = '';
 
 // Row selection state
 let selectedHeaderRow = 0;    // 0-indexed row used as header
 let rowRange = { start: null, end: null };  // 0-indexed data row range (after header)
+// The server returns rows[start_row:] when a range was sent: the first loaded row is data row
+// loadedRowOffset. Display index + loadedRowOffset = data row index (the one rowRange uses).
+let loadedRowOffset = 0;
 
 // Context menu state
 let contextMenuRowIndex = null;
+
+// Stepper state
+let fileLoaded = false;
+let openStep = 1;
+let currentFileName = '';
+let totalRows = 0;
+let sheetList = [];
+let currentSheet = null;      // null: the sheet the server reads by default (the active sheet)
+let previousBom = null;       // { article_id, description, count } when a previous version is loaded
+
+const MAP_PREVIEW_ROWS = 12;
+const CHEVRON_SVG = '<svg class="fx-icon" viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6l4 4 4-4"/></svg>';
+
+// ========================================================================
+// Stepper
+// ========================================================================
+
+/** Row number as in the sheet (1-indexed) for a 0-indexed data row. */
+function sheetRowOf(dataIndex) {
+    return selectedHeaderRow + 2 + dataIndex;
+}
+
+function isDescriptionMapped() {
+    return !!document.querySelector('.mapping-multiselect[data-standard="Description"] input[type="checkbox"]:checked');
+}
+
+function mappedFieldCount() {
+    return Array.from(document.querySelectorAll('.mapping-multiselect'))
+        .filter(ms => ms.querySelector('input[type="checkbox"]:checked')).length;
+}
+
+/** 'todo', 'ready' or 'warn' for step n. */
+function stepStatus(n) {
+    if (!fileLoaded) return 'todo';
+    if (n === 3 && !isDescriptionMapped()) return 'warn';
+    return 'ready';
+}
+
+const STATUS_BADGE = {
+    todo: { cls: 'badge badge-gray', text: 'To do' },
+    ready: { cls: 'badge badge-success', text: '✓ Ready' },
+    warn: { cls: 'badge badge-warning', text: '⚠ Description not mapped' },
+};
+
+function rangeText() {
+    if (rowRange.start === null && rowRange.end === null) return 'All';
+    const s = rowRange.start !== null ? sheetRowOf(rowRange.start) : sheetRowOf(0);
+    const e = rowRange.end !== null ? sheetRowOf(rowRange.end) : 'end';
+    return `${s}–${e}`;
+}
+
+function showStep(n) {
+    if (n > 1 && !fileLoaded) return;
+    openStep = n;
+    document.querySelectorAll('.up-step').forEach(s => {
+        s.classList.toggle('is-open', s.id === 'step' + n);
+    });
+    hideRowContextMenu();
+    refreshUploadUi();
+    const section = document.getElementById('step' + n);
+    if (section && section.getBoundingClientRect().top < 0) {
+        section.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
+}
+
+document.querySelectorAll('.up-stepbtn').forEach(b => {
+    b.addEventListener('click', () => showStep(+b.dataset.step));
+});
+document.querySelectorAll('[data-go]').forEach(b => {
+    b.addEventListener('click', () => showStep(+b.dataset.go));
+});
+
+/** Redraw everything that depends on the state: stepper, status, summaries, mapped preview. */
+function refreshUploadUi() {
+    const page = document.getElementById('uploadPage');
+    if (page) page.dataset.fileLoaded = fileLoaded ? 'true' : 'false';
+
+    const mapped = mappedFieldCount();
+
+    for (let n = 1; n <= 3; n++) {
+        const status = stepStatus(n);
+        const section = document.getElementById('step' + n);
+        if (section) section.classList.toggle('is-todo', status === 'todo');
+
+        document.querySelectorAll(`[data-status="${n}"]`).forEach(b => {
+            b.className = STATUS_BADGE[status].cls;
+            b.textContent = STATUS_BADGE[status].text;
+        });
+
+        const btn = document.getElementById('stepBtn' + n);
+        if (btn) {
+            btn.disabled = n > 1 && !fileLoaded;
+            if (n === openStep) btn.setAttribute('aria-current', 'step');
+            else btn.removeAttribute('aria-current');
+        }
+        const numCls = status === 'ready' ? 'is-done' : (status === 'warn' ? 'is-warn' : 'is-todo');
+        const num = document.querySelector(`[data-num="${n}"]`);
+        if (num) num.className = 'up-num ' + (n === openStep ? 'is-current' : numCls);
+        const sumNum = document.querySelector(`[data-num-sum="${n}"]`);
+        if (sumNum) sumNum.className = 'up-num ' + numCls;
+        const sr = document.querySelector(`[data-sr-state="${n}"]`);
+        if (sr) sr.textContent = status === 'ready' ? ', ready' : (status === 'warn' ? ', needs attention' : ', to do');
+    }
+    setText('stepNow', openStep);
+
+    // Step 1: file
+    setText('stepSub1', fileLoaded ? currentFileName : 'No file loaded');
+    setText('sumFileName', currentFileName);
+    setText('sumSheet', currentSheet || (sheetList.length > 1 ? 'Active sheet' : (sheetList[0] || '—')));
+    setText('sumRows', fileLoaded ? totalRows : '—');
+    setText('sumSheets', sheetList.length || 1);
+    const sheetsFact = document.getElementById('sumSheetsFact');
+    if (sheetsFact) sheetsFact.hidden = sheetList.length <= 1;
+    const sheetFact = document.getElementById('sumSheetFact');
+    if (sheetFact) sheetFact.hidden = fileLoaded && sheetList.length === 0;   // CSV: no sheets
+    const dropZone = document.getElementById('dropZone');
+    if (dropZone) {
+        dropZone.classList.toggle('has-file', fileLoaded);
+        dropZone.setAttribute('aria-label', fileLoaded ? 'Choose another BOM file' : 'Choose a BOM file');
+    }
+    const step1Actions = document.getElementById('step1Actions');
+    if (step1Actions) step1Actions.hidden = !fileLoaded;
+
+    // Step 2: rows
+    const headText = selectedHeaderRow + 1;
+    const range = rangeText();
+    setText('stepSub2', fileLoaded
+        ? `Header row ${headText} · ${range === 'All' ? 'all rows' : 'rows ' + range}`
+        : 'To do');
+    setText('sumHead', fileLoaded ? headText : '—');
+    setText('sumRange', fileLoaded ? range : '—');
+    const headerInput = document.getElementById('headerRowInput');
+    if (headerInput && document.activeElement !== headerInput) headerInput.value = fileLoaded ? headText : '';
+
+    // Step 3: map and match
+    let sub3 = 'To do';
+    if (fileLoaded) {
+        sub3 = `${mapped} of ${standardColumns.length} fields`;
+        if (!isDescriptionMapped()) sub3 = '⚠ Description not mapped · ' + sub3;
+        if (selectedKlantNr) sub3 += ` · Klant ${selectedKlantNr}`;
+        if (previousBom) sub3 += ` · vs ${previousBom.article_id}`;
+    }
+    setText('stepSub3', sub3);
+    setText('sumFields', fileLoaded ? `${mapped} of ${standardColumns.length}` : '—');
+    setText('sumKlant', selectedKlantNr || '—');
+    const against = document.getElementById('sumAgainst');
+    if (against) {
+        against.textContent = previousBom ? previousBom.article_id : 'Live ERP catalog';
+        against.classList.toggle('is-text', !previousBom);
+    }
+
+    renderMapPreview();
+}
+
+function setText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+/** Show the loaded file (upload, re-upload or back navigation) and open the right step. */
+function setFileLoaded(data, step) {
+    fileLoaded = true;
+    currentFileName = data.filename || '';
+    totalRows = data.total_rows || 0;
+    sheetList = Array.isArray(data.sheets) ? data.sheets : [];
+
+    document.getElementById('fileName').textContent = currentFileName;
+    updateRowCountText();
+    renderSheetSelector();
+
+    if (step) {
+        showStep(step);
+    } else {
+        refreshUploadUi();
+    }
+}
+
+function updateRowCountText() {
+    setText('fileRowCount', `${totalRows} rows`);
+    setText('fileSheetCount', sheetList.length > 1 ? ` · ${sheetList.length} sheets` : '');
+}
 
 // ========================================================================
 // Drop Zone
@@ -26,6 +213,12 @@ const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 
 dropZone.addEventListener('click', () => fileInput.click());
+dropZone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        fileInput.click();
+    }
+});
 dropZone.addEventListener('dragover', (e) => {
     e.preventDefault();
     dropZone.classList.add('drag-over');
@@ -44,6 +237,8 @@ fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         uploadFile(e.target.files[0]);
     }
+    // Allow choosing the same file again
+    fileInput.value = '';
 });
 
 // ========================================================================
@@ -71,30 +266,15 @@ async function uploadFile(file) {
 
         currentHeaders = data.headers;
         currentRows = data.preview_rows;
+        loadedRowOffset = 0;
 
         // Reset row selection state
         selectedHeaderRow = 0;
         rowRange = { start: null, end: null };
+        currentSheet = null;
 
-        // Show file info
-        document.getElementById('fileName').textContent = data.filename;
-        document.getElementById('fileRowCount').textContent = `(${data.total_rows} rows)`;
-        document.getElementById('fileInfo').style.display = 'block';
-
-        // Show sheet selector if multiple sheets
-        if (data.sheets && data.sheets.length > 1) {
-            const select = document.getElementById('sheetSelect');
-            select.innerHTML = data.sheets.map(s =>
-                `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
-            ).join('');
-            document.getElementById('sheetSelector').style.display = 'block';
-        } else {
-            document.getElementById('sheetSelector').style.display = 'none';
-        }
-
-        // Show row range controls and generic RC checkbox
-        const rowRangeSection = document.getElementById('rowRangeSection');
-        if (rowRangeSection) rowRangeSection.style.display = 'block';
+        // Show file info and the sheet choice
+        setFileLoaded(data);
         clearRowRangeInputs();
 
         // Check if we have previous settings to restore
@@ -102,10 +282,7 @@ async function uploadFile(file) {
         if (prev && prev.header_row != null && prev.header_row !== 0) {
             // Restore header row, sheet, and row range before rendering
             selectedHeaderRow = prev.header_row;
-            if (prev.sheet_name) {
-                const sheetSelect = document.getElementById('sheetSelect');
-                if (sheetSelect) sheetSelect.value = prev.sheet_name;
-            }
+            if (prev.sheet_name) setSheet(prev.sheet_name);
             rowRange = {
                 start: prev.start_row != null ? prev.start_row : null,
                 end: prev.end_row != null ? prev.end_row : null,
@@ -118,10 +295,7 @@ async function uploadFile(file) {
             if (prev.column_mapping) applyStoredMapping(prev.column_mapping);
         } else if (prev) {
             // Header row is 0 (default) - restore sheet and range
-            if (prev.sheet_name) {
-                const sheetSelect = document.getElementById('sheetSelect');
-                if (sheetSelect) sheetSelect.value = prev.sheet_name;
-            }
+            if (prev.sheet_name) setSheet(prev.sheet_name);
             rowRange = {
                 start: prev.start_row != null ? prev.start_row : null,
                 end: prev.end_row != null ? prev.end_row : null,
@@ -141,14 +315,6 @@ async function uploadFile(file) {
             renderMapping();
         }
 
-        document.getElementById('previewSection').style.display = 'block';
-        const previousBomSection = document.getElementById('previousBomSection');
-        if (previousBomSection) previousBomSection.style.display = 'block';
-        document.getElementById('mappingSection').style.display = 'block';
-        const customerSection = document.getElementById('customerSection');
-        if (customerSection) customerSection.style.display = 'block';
-        document.getElementById('processSection').style.display = 'flex';
-
         // Restore a previously fetched previous-version BOM (if any)
         restorePreviousBom();
 
@@ -159,6 +325,9 @@ async function uploadFile(file) {
 
         // Show clear button if process data exists from a previous session
         showClearProcessDataBtn(!!data.has_process_data);
+
+        // Restored settings: straight to mapping. A workbook with several sheets: choose the sheet first.
+        showStep(prev ? 3 : (sheetList.length > 1 ? 1 : 2));
 
         if (prev) {
             toast.success(`Restored previous settings for ${data.filename}`);
@@ -176,12 +345,53 @@ async function uploadFile(file) {
 // Sheet & Header Row Changes
 // ========================================================================
 
-document.getElementById('sheetSelect')?.addEventListener('change', reloadFile);
+function renderSheetSelector() {
+    const wrap = document.getElementById('sheetSelector');
+    const seg = document.getElementById('sheetSeg');
+    if (!wrap || !seg) return;
+    if (sheetList.length <= 1) {
+        wrap.hidden = true;
+        seg.innerHTML = '';
+        return;
+    }
+    wrap.hidden = false;
+    seg.innerHTML = sheetList.map(s => {
+        const on = s === currentSheet;
+        return `<button type="button" role="radio" aria-checked="${on}" tabindex="${on || (!currentSheet && s === sheetList[0]) ? 0 : -1}" data-sheet="${escapeHtml(s)}">${escapeHtml(s)}</button>`;
+    }).join('');
+    setText('sheetHint', currentSheet
+        ? 'Changing the sheet reads the file again.'
+        : 'Showing the sheet that was open when the file was saved. Pick a sheet to switch.');
+}
+
+/** Set the chosen sheet without reloading (used when restoring settings). */
+function setSheet(name) {
+    currentSheet = sheetList.includes(name) ? name : currentSheet;
+    renderSheetSelector();
+}
+
+document.getElementById('sheetSeg')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-sheet]');
+    if (!btn || btn.dataset.sheet === currentSheet) return;
+    currentSheet = btn.dataset.sheet;
+    renderSheetSelector();
+    document.querySelector(`#sheetSeg [data-sheet="${CSS.escape(currentSheet)}"]`)?.focus();
+    reloadFile();
+});
+
+document.getElementById('sheetSeg')?.addEventListener('keydown', (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    const buttons = Array.from(document.querySelectorAll('#sheetSeg [data-sheet]'));
+    const i = buttons.indexOf(document.activeElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const step = (e.key === 'ArrowLeft' || e.key === 'ArrowUp') ? -1 : 1;
+    buttons[(i + step + buttons.length) % buttons.length].click();
+});
 
 async function reloadFile() {
     const headerRow = selectedHeaderRow;
-    const sheetSelect = document.getElementById('sheetSelect');
-    const sheetName = sheetSelect ? sheetSelect.value : null;
+    const sheetName = currentSheet;
 
     // Get start/end row from state (not inputs - those are display values)
     const startRow = rowRange.start;
@@ -200,7 +410,9 @@ async function reloadFile() {
 
         currentHeaders = data.headers;
         currentRows = data.preview_rows;
-        document.getElementById('fileRowCount').textContent = `(${data.total_rows} rows)`;
+        loadedRowOffset = startRow !== null ? startRow : 0;
+        totalRows = data.total_rows;
+        updateRowCountText();
 
         renderPreview();
         renderMapping();
@@ -211,28 +423,78 @@ async function reloadFile() {
     }
 }
 
+async function setHeaderRowFromInput() {
+    const input = document.getElementById('headerRowInput');
+    const val = input && input.value ? parseInt(input.value, 10) : NaN;
+    if (!fileLoaded || isNaN(val)) {
+        refreshUploadUi();
+        return;
+    }
+    if (val < 1) {
+        toast.warning('The header row is row 1 or lower in the sheet');
+        refreshUploadUi();
+        return;
+    }
+    const newHeaderRow = val - 1;
+    if (newHeaderRow === selectedHeaderRow) return;
+
+    selectedHeaderRow = newHeaderRow;
+    // Reset row range when header changes
+    rowRange = { start: null, end: null };
+    clearRowRangeInputs();
+    await reloadFile();
+    toast.success(`Row ${newHeaderRow + 1} set as header row`);
+}
+
+document.getElementById('headerRowInput')?.addEventListener('change', setHeaderRowFromInput);
+
 // ========================================================================
-// Preview Table (with row numbers and highlighting)
+// Preview Table, step 2 (row numbers, range status, right-click menu)
 // ========================================================================
 
 function renderPreview() {
     const thead = document.getElementById('previewHead');
     const tbody = document.getElementById('previewBody');
 
-    // Header: row number column + data columns
-    thead.innerHTML = '<tr><th class="preview-row-number">#</th>' + currentHeaders.map(h =>
-        `<th>${escapeHtml(h)}</th>`
-    ).join('') + '</tr>';
+    // Header: the header row itself, then the column names
+    thead.innerHTML = '<tr class="is-head">' +
+        `<th class="up-rn">${selectedHeaderRow + 1}</th>` +
+        '<th class="up-use"><span class="badge badge-primary">Header</span></th>' +
+        currentHeaders.map(h => `<th>${escapeHtml(h)}</th>`).join('') + '</tr>';
 
-    // Body: each row gets a row number and right-click handler
+    // Body: each row gets its row number, its use, and a right-click handler
     tbody.innerHTML = currentRows.map((row, idx) => {
-        const rowClasses = getRowClasses(idx);
-        return `<tr class="${rowClasses}" oncontextmenu="showRowContextMenu(event, ${idx})">` +
-            `<td class="preview-row-number">${idx + 1}</td>` +
-            currentHeaders.map(h =>
-                `<td>${escapeHtml(row[h] || '')}</td>`
-            ).join('') + '</tr>';
+        const dataIdx = idx + loadedRowOffset;
+        const rowClasses = getRowClasses(dataIdx);
+        return `<tr class="${rowClasses}" oncontextmenu="showRowContextMenu(event, ${dataIdx})">` +
+            `<td class="up-rn">${sheetRowOf(dataIdx)}</td>` +
+            `<td class="up-use">${rowUseBadge(dataIdx)}</td>` +
+            currentHeaders.map(h => {
+                const v = row[h] || '';
+                return `<td title="${escapeHtml(v)}">${escapeHtml(v)}</td>`;
+            }).join('') + '</tr>';
     }).join('');
+
+    if (!currentRows.length) {
+        tbody.innerHTML = `<tr><td class="up-empty" colspan="${currentHeaders.length + 2}">No rows below the header row.</td></tr>`;
+    }
+
+    const shown = currentRows.length;
+    let hint = '';
+    if (shown) {
+        hint = shown < totalRows
+            ? `first ${shown} of ${totalRows} rows below the header`
+            : `${shown} rows below the header`;
+    }
+    setText('rowsSheetHint', hint);
+
+    refreshUploadUi();
+}
+
+function isInRange(rowIndex) {
+    const start = rowRange.start !== null ? rowRange.start : 0;
+    const end = rowRange.end !== null ? rowRange.end : Infinity;
+    return rowIndex >= start && rowIndex <= end;
 }
 
 function getRowClasses(rowIndex) {
@@ -240,10 +502,7 @@ function getRowClasses(rowIndex) {
 
     // Check if row is out of range
     if (rowRange.start !== null || rowRange.end !== null) {
-        const start = rowRange.start !== null ? rowRange.start : 0;
-        const end = rowRange.end !== null ? rowRange.end : Infinity;
-
-        if (rowIndex < start || rowIndex > end) {
+        if (!isInRange(rowIndex)) {
             classes.push('row-out-of-range');
         } else {
             classes.push('row-in-range');
@@ -253,6 +512,69 @@ function getRowClasses(rowIndex) {
     }
 
     return classes.join(' ');
+}
+
+/** The use of a row in words: First / Last / Data / Skipped. */
+function rowUseBadge(rowIndex) {
+    if (!isInRange(rowIndex)) return '<span class="badge badge-gray">Skipped</span>';
+    if (rowIndex === rowRange.start) return '<span class="badge badge-primary">First</span>';
+    if (rowIndex === rowRange.end) return '<span class="badge badge-primary">Last</span>';
+    return '<span class="badge up-badge-data">Data</span>';
+}
+
+// ========================================================================
+// Mapped preview, step 3 (mapped column heads marked)
+// ========================================================================
+
+function getMappingByColumn() {
+    const tags = {};
+    document.querySelectorAll('.mapping-multiselect').forEach(ms => {
+        const stdCol = ms.dataset.standard;
+        ms.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+            (tags[cb.value] = tags[cb.value] || []).push(stdCol);
+        });
+    });
+    return tags;
+}
+
+function renderMapPreview() {
+    const thead = document.getElementById('mapPreviewHead');
+    const tbody = document.getElementById('mapPreviewBody');
+    if (!thead || !tbody) return;
+    if (!fileLoaded) {
+        thead.innerHTML = '';
+        tbody.innerHTML = '';
+        setText('mapPreviewHint', '');
+        return;
+    }
+
+    const tags = getMappingByColumn();
+    const isNumCol = h => (tags[h] || []).includes('Quantity');
+    const isMonoCol = h => (tags[h] || []).some(t => t === 'Quantity' || t === 'MPN');
+
+    thead.innerHTML = '<tr><th class="up-rn">#</th>' + currentHeaders.map(h => {
+        const t = tags[h];
+        const cls = [t ? 'up-mapped' : '', isNumCol(h) ? 'up-num-col' : ''].join(' ').trim();
+        return `<th class="${cls}"><span class="up-th-name">${escapeHtml(h)}</span>` +
+            (t ? `<span class="up-th-tag">${escapeHtml(t.join(' · '))}</span>` : '') + '</th>';
+    }).join('') + '</tr>';
+
+    const rows = [];
+    for (let idx = 0; idx < currentRows.length && rows.length < MAP_PREVIEW_ROWS; idx++) {
+        const dataIdx = idx + loadedRowOffset;
+        if (!isInRange(dataIdx)) continue;
+        const row = currentRows[idx];
+        rows.push(`<tr><td class="up-rn">${sheetRowOf(dataIdx)}</td>` + currentHeaders.map(h => {
+            const v = row[h] || '';
+            const cls = [isNumCol(h) ? 'up-num-col' : '', isMonoCol(h) ? 'fx-mono' : ''].join(' ').trim();
+            const cell = v === '' ? '<span class="up-none">—</span>' : escapeHtml(v);
+            return `<td class="${cls}" title="${escapeHtml(v)}">${cell}</td>`;
+        }).join('') + '</tr>');
+    }
+    tbody.innerHTML = rows.length
+        ? rows.join('')
+        : `<tr><td class="up-empty" colspan="${currentHeaders.length + 1}">No data rows in the range.</td></tr>`;
+    setText('mapPreviewHint', rows.length ? `first ${rows.length} data rows` : '');
 }
 
 // ========================================================================
@@ -294,6 +616,21 @@ document.addEventListener('contextmenu', (e) => {
         hideRowContextMenu();
     }
 });
+// Escape closes the context menu and the mapping dropdowns
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    hideRowContextMenu();
+    document.querySelectorAll('.mapping-multiselect-dropdown').forEach(d => {
+        if (d.style.display !== 'none') {
+            d.style.display = 'none';
+            const display = d.previousElementSibling;
+            if (display) {
+                display.setAttribute('aria-expanded', 'false');
+                display.focus();
+            }
+        }
+    });
+});
 
 // ========================================================================
 // Context Menu Actions
@@ -305,7 +642,7 @@ async function setAsHeaderRow() {
         return;
     }
 
-    // The clicked row index is relative to the current data rows.
+    // The clicked row index is a data row index (0 = first row under the header).
     // Current header_row + 1 (for the header itself) + contextMenuRowIndex = raw row
     const newHeaderRow = selectedHeaderRow + 1 + contextMenuRowIndex;
 
@@ -327,17 +664,18 @@ function setAsStartRow() {
         return;
     }
 
-    rowRange.start = contextMenuRowIndex;
+    const rowIndex = contextMenuRowIndex;
+    rowRange.start = rowIndex;
 
     // If end is before start, clear end
-    if (rowRange.end !== null && rowRange.end < contextMenuRowIndex) {
+    if (rowRange.end !== null && rowRange.end < rowIndex) {
         rowRange.end = null;
     }
 
     hideRowContextMenu();
     updateRowRangeInputs();
     renderPreview();
-    toast.info(`Start row set to ${contextMenuRowIndex + 1}`);
+    toast.info(`First data row set to ${sheetRowOf(rowIndex)}`);
 }
 
 function setAsEndRow() {
@@ -346,17 +684,18 @@ function setAsEndRow() {
         return;
     }
 
-    rowRange.end = contextMenuRowIndex;
+    const rowIndex = contextMenuRowIndex;
+    rowRange.end = rowIndex;
 
     // If start is after end, clear start
-    if (rowRange.start !== null && rowRange.start > contextMenuRowIndex) {
+    if (rowRange.start !== null && rowRange.start > rowIndex) {
         rowRange.start = null;
     }
 
     hideRowContextMenu();
     updateRowRangeInputs();
     renderPreview();
-    toast.info(`End row set to ${contextMenuRowIndex + 1}`);
+    toast.info(`Last data row set to ${sheetRowOf(rowIndex)}`);
 }
 
 function clearRowRangeMenu() {
@@ -365,19 +704,27 @@ function clearRowRangeMenu() {
 }
 
 // ========================================================================
-// Row Range Controls (input fields)
+// Row Range Controls (input fields, in sheet row numbers)
 // ========================================================================
 
 function applyRowRange() {
     const startInput = document.getElementById('startRowInput');
     const endInput = document.getElementById('endRowInput');
 
-    const startVal = startInput.value ? parseInt(startInput.value) : null;
-    const endVal = endInput.value ? parseInt(endInput.value) : null;
+    const startVal = startInput.value ? parseInt(startInput.value, 10) : null;
+    const endVal = endInput.value ? parseInt(endInput.value, 10) : null;
 
-    // Convert from 1-indexed (display) to 0-indexed (internal)
-    rowRange.start = startVal !== null ? startVal - 1 : null;
-    rowRange.end = endVal !== null ? endVal - 1 : null;
+    // The inputs are sheet row numbers; the first data row is the row under the header
+    const firstDataRow = sheetRowOf(0);
+    if ((startVal !== null && startVal < firstDataRow) || (endVal !== null && endVal < firstDataRow)) {
+        toast.warning(`Data rows start at row ${firstDataRow}, under the header row`);
+        updateRowRangeInputs();
+        return;
+    }
+
+    // Convert from sheet row numbers (display) to 0-indexed data rows (internal)
+    rowRange.start = startVal !== null ? startVal - firstDataRow : null;
+    rowRange.end = endVal !== null ? endVal - firstDataRow : null;
 
     // Validate
     if (rowRange.start !== null && rowRange.end !== null && rowRange.start > rowRange.end) {
@@ -385,18 +732,28 @@ function applyRowRange() {
         rowRange.start = null;
         rowRange.end = null;
         clearRowRangeInputs();
+        renderPreview();
         return;
     }
 
     renderPreview();
 
     const rangeDesc = [];
-    if (rowRange.start !== null) rangeDesc.push(`from row ${rowRange.start + 1}`);
-    if (rowRange.end !== null) rangeDesc.push(`to row ${rowRange.end + 1}`);
+    if (rowRange.start !== null) rangeDesc.push(`from row ${sheetRowOf(rowRange.start)}`);
+    if (rowRange.end !== null) rangeDesc.push(`to row ${sheetRowOf(rowRange.end)}`);
     if (rangeDesc.length > 0) {
         toast.info(`Row range set: ${rangeDesc.join(' ')}`);
     }
 }
+
+['startRowInput', 'endRowInput'].forEach(id => {
+    document.getElementById(id)?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            applyRowRange();
+        }
+    });
+});
 
 function clearRowRange() {
     rowRange = { start: null, end: null };
@@ -415,9 +772,9 @@ function clearRowRangeInputs() {
 function updateRowRangeInputs() {
     const startInput = document.getElementById('startRowInput');
     const endInput = document.getElementById('endRowInput');
-    // Display as 1-indexed
-    if (startInput) startInput.value = rowRange.start !== null ? rowRange.start + 1 : '';
-    if (endInput) endInput.value = rowRange.end !== null ? rowRange.end + 1 : '';
+    // Display as sheet row numbers
+    if (startInput) startInput.value = rowRange.start !== null ? sheetRowOf(rowRange.start) : '';
+    if (endInput) endInput.value = rowRange.end !== null ? sheetRowOf(rowRange.end) : '';
 }
 
 // ========================================================================
@@ -427,8 +784,10 @@ function updateRowRangeInputs() {
 function renderMapping() {
     const grid = document.getElementById('mappingGrid');
 
-    grid.innerHTML = standardColumns.map(stdCol => {
-        const required = stdCol === 'Description' ? ' *' : '';
+    grid.innerHTML = standardColumns.map((stdCol, i) => {
+        const required = stdCol === 'Description'
+            ? ' <span class="badge badge-warning up-req">Required</span>' : '';
+        const labelId = `mapLabel${i}`;
 
         // Build the multi-select dropdown
         const checkboxes = currentHeaders.map(h => {
@@ -440,15 +799,17 @@ function renderMapping() {
         }).join('');
 
         return `
-            <div class="mapping-row">
-                <label class="mapping-label">${escapeHtml(stdCol)}${required}</label>
+            <div class="up-group">
+                <span class="up-label" id="${labelId}">${escapeHtml(stdCol)}${required}</span>
                 <div class="mapping-multiselect" data-standard="${escapeHtml(stdCol)}">
-                    <div class="mapping-multiselect-display" onclick="toggleMappingDropdown(this)">
-                        <span class="mapping-multiselect-text">-- not mapped --</span>
-                        <span class="mapping-multiselect-arrow">&#9662;</span>
-                    </div>
+                    <button type="button" class="mapping-multiselect-display" aria-haspopup="true" aria-expanded="false"
+                            aria-labelledby="${labelId} ${labelId}v" onclick="toggleMappingDropdown(this)">
+                        <span class="mapping-multiselect-text" id="${labelId}v">Not mapped</span>
+                        <span class="mapping-multiselect-arrow">${CHEVRON_SVG}</span>
+                    </button>
                     <div class="mapping-multiselect-dropdown" style="display: none;">
-                        ${checkboxes}
+                        ${checkboxes || '<div class="up-menu-empty">No columns in this sheet.</div>'}
+                        <div class="up-menu-foot">Pick more columns to combine them.</div>
                     </div>
                 </div>
             </div>
@@ -457,7 +818,7 @@ function renderMapping() {
 
     // Update display text for auto-matched selections
     document.querySelectorAll('.mapping-multiselect').forEach(ms => {
-        updateMappingDisplay(ms);
+        updateMappingDisplay(ms, true);
     });
 
     // Add change listeners to checkboxes
@@ -466,6 +827,8 @@ function renderMapping() {
             updateMappingDisplay(cb.closest('.mapping-multiselect'));
         });
     });
+
+    refreshUploadUi();
 }
 
 function toggleMappingDropdown(displayEl) {
@@ -475,14 +838,17 @@ function toggleMappingDropdown(displayEl) {
     // Close all other dropdowns first
     document.querySelectorAll('.mapping-multiselect-dropdown').forEach(d => {
         d.style.display = 'none';
+        if (d.previousElementSibling) d.previousElementSibling.setAttribute('aria-expanded', 'false');
     });
 
     if (!isOpen) {
         dropdown.style.display = 'block';
+        displayEl.setAttribute('aria-expanded', 'true');
         // Close on outside click
         const closeHandler = (e) => {
             if (!dropdown.contains(e.target) && !displayEl.contains(e.target)) {
                 dropdown.style.display = 'none';
+                displayEl.setAttribute('aria-expanded', 'false');
                 document.removeEventListener('mousedown', closeHandler);
             }
         };
@@ -490,17 +856,19 @@ function toggleMappingDropdown(displayEl) {
     }
 }
 
-function updateMappingDisplay(multiselect) {
+function updateMappingDisplay(multiselect, skipRefresh) {
     const checked = multiselect.querySelectorAll('input[type="checkbox"]:checked');
     const textEl = multiselect.querySelector('.mapping-multiselect-text');
+    const display = multiselect.querySelector('.mapping-multiselect-display');
     if (checked.length === 0) {
-        textEl.textContent = '-- not mapped --';
-        textEl.style.color = 'var(--text-muted)';
+        textEl.textContent = 'Not mapped';
+        if (display) display.classList.add('is-empty');
     } else {
         const names = Array.from(checked).map(cb => cb.value);
         textEl.textContent = names.join(' + ');
-        textEl.style.color = 'var(--text-main)';
+        if (display) display.classList.remove('is-empty');
     }
+    if (!skipRefresh) refreshUploadUi();
 }
 
 function autoMatch(standardCol, headerCol) {
@@ -536,8 +904,9 @@ function applyStoredMapping(mapping) {
         ms.querySelectorAll('input[type="checkbox"]').forEach(cb => {
             cb.checked = values.includes(cb.value);
         });
-        updateMappingDisplay(ms);
+        updateMappingDisplay(ms, true);
     });
+    refreshUploadUi();
 }
 
 async function restoreCustomer(klantNr) {
@@ -613,8 +982,23 @@ function initCustomerSelector() {
     });
 }
 
+function updateCustomerUi() {
+    const searchInput = document.getElementById('customerSearch');
+    const hint = document.getElementById('customerHint');
+    if (searchInput) {
+        searchInput.placeholder = selectedKlantNr ? 'Search another customer' : 'Search customer by name or number';
+    }
+    if (hint) {
+        hint.textContent = selectedKlantNr
+            ? `Customer-specific parts of Klant ${selectedKlantNr} are included in matching.`
+            : 'Empty: generic matching without customer-specific parts.';
+    }
+    refreshUploadUi();
+}
+
 function selectCustomer(klantNr, klantNaam) {
     selectedKlantNr = klantNr;
+    selectedKlantNaam = klantNaam;
     const searchInput = document.getElementById('customerSearch');
     const dropdown = document.getElementById('customerDropdown');
     const selectedDiv = document.getElementById('selectedCustomer');
@@ -622,16 +1006,24 @@ function selectCustomer(klantNr, klantNaam) {
 
     if (searchInput) searchInput.value = '';
     if (dropdown) dropdown.style.display = 'none';
-    if (selectedText) selectedText.textContent = `${klantNr} — ${klantNaam}`;
+    if (selectedText) {
+        selectedText.innerHTML = `Klant <span class="fx-mono">${escapeHtml(klantNr)}</span>` +
+            (klantNaam ? ` · ${escapeHtml(klantNaam)}` : '');
+        selectedText.title = `${klantNr} — ${klantNaam}`;
+    }
     if (selectedDiv) selectedDiv.style.display = 'inline-flex';
+    updateCustomerUi();
 
     toast.success(`Customer selected: ${klantNaam}`);
 }
 
 function clearCustomerSelection() {
     selectedKlantNr = '';
+    selectedKlantNaam = '';
     const selectedDiv = document.getElementById('selectedCustomer');
     if (selectedDiv) selectedDiv.style.display = 'none';
+    updateCustomerUi();
+    document.getElementById('customerSearch')?.focus();
     toast.info('Customer selection cleared');
 }
 
@@ -639,7 +1031,7 @@ function clearCustomerSelection() {
 const klantenReady = loadKlanten().then(() => initCustomerSelector());
 
 // ========================================================================
-// Process BOM
+// Back navigation (/?back=1 from the Process page)
 // ========================================================================
 
 async function checkBackNavigation() {
@@ -662,25 +1054,16 @@ async function checkBackNavigation() {
             start: data.start_row != null ? data.start_row : null,
             end: data.end_row != null ? data.end_row : null,
         };
+        // The stored rows were read with the range: they start at start_row
+        loadedRowOffset = rowRange.start !== null ? rowRange.start : 0;
+        sheetList = Array.isArray(data.sheets) ? data.sheets : [];
+        currentSheet = data.sheet_name && sheetList.includes(data.sheet_name) ? data.sheet_name : null;
 
-        // Show file info
-        document.getElementById('fileName').textContent = data.filename;
-        document.getElementById('fileRowCount').textContent = `(${data.total_rows} rows)`;
-        document.getElementById('fileInfo').style.display = 'block';
-
-        // Sheet selector
-        if (data.sheets && data.sheets.length > 1) {
-            const select = document.getElementById('sheetSelect');
-            select.innerHTML = data.sheets.map(s =>
-                `<option value="${escapeHtml(s)}">${escapeHtml(s)}</option>`
-            ).join('');
-            document.getElementById('sheetSelector').style.display = 'block';
-            if (data.sheet_name) select.value = data.sheet_name;
-        }
+        // Show file info and sheet choice
+        setFileLoaded(data);
 
         // Row range inputs
         updateRowRangeInputs();
-        document.getElementById('rowRangeSection').style.display = 'block';
 
         // Render preview and mapping
         renderPreview();
@@ -690,15 +1073,6 @@ async function checkBackNavigation() {
         if (data.column_mapping && Object.keys(data.column_mapping).length > 0) {
             applyStoredMapping(data.column_mapping);
         }
-
-        // Show all sections
-        document.getElementById('previewSection').style.display = 'block';
-        const previousBomSection = document.getElementById('previousBomSection');
-        if (previousBomSection) previousBomSection.style.display = 'block';
-        document.getElementById('mappingSection').style.display = 'block';
-        const customerSection = document.getElementById('customerSection');
-        if (customerSection) customerSection.style.display = 'block';
-        document.getElementById('processSection').style.display = 'flex';
 
         // Restore a previously fetched previous-version BOM (if any)
         restorePreviousBom();
@@ -711,6 +1085,7 @@ async function checkBackNavigation() {
         // Show clear button if process data exists
         showClearProcessDataBtn(!!data.has_process_data);
 
+        showStep(3);
         toast.info('Restored previous session');
     } catch (e) {
         // Silently fail - user gets a fresh upload page
@@ -722,6 +1097,8 @@ async function checkBackNavigation() {
 // Check for back navigation after customer list is ready
 klantenReady.then(() => checkBackNavigation());
 
+// ========================================================================
+// Clear stored process data
 // ========================================================================
 
 function showClearProcessDataBtn(hasData) {
@@ -745,11 +1122,18 @@ async function clearProcessData() {
 // Previous Version (Exact) BOM
 // ========================================================================
 
-function showPreviousBomInfo(text) {
+function showPreviousBomInfo(articleId, description, count) {
+    previousBom = { article_id: articleId || '', description: description || '', count: count || 0 };
     const info = document.getElementById('previousBomInfo');
     const txt = document.getElementById('previousBomInfoText');
-    if (txt) txt.textContent = text;
+    if (txt) {
+        txt.innerHTML = `<span class="fx-mono">${escapeHtml(previousBom.article_id)}</span>` +
+            (previousBom.description ? ` · ${escapeHtml(previousBom.description)}` : '') +
+            ` · <span class="fx-mono">${previousBom.count}</span> components. Process BOM matches against this BOM.`;
+    }
     if (info) info.style.display = 'flex';
+    document.getElementById('previousBomSection')?.classList.add('is-loaded');
+    refreshUploadUi();
 }
 
 async function fetchPreviousBom() {
@@ -765,9 +1149,7 @@ async function fetchPreviousBom() {
             method: 'POST',
             body: JSON.stringify({ article_id: articleId })
         });
-        const desc = data.description ? ` — ${data.description}` : '';
-        showPreviousBomInfo(`Previous BOM ${data.article_id}${desc}: ${data.total_rows} components loaded. ` +
-            `Process BOM will match against this BOM.`);
+        showPreviousBomInfo(data.article_id, data.description, data.total_rows);
         toast.success(`Previous BOM ${data.article_id} loaded (${data.total_rows} components)`);
     } catch (e) {
         // toast shown by apiCall
@@ -781,8 +1163,11 @@ async function clearPreviousBom() {
         await apiCall('/api/exact/clear-previous', { method: 'POST' });
         const info = document.getElementById('previousBomInfo');
         if (info) info.style.display = 'none';
+        document.getElementById('previousBomSection')?.classList.remove('is-loaded');
         const input = document.getElementById('previousArticleId');
         if (input) input.value = '';
+        previousBom = null;
+        refreshUploadUi();
         toast.info('Previous BOM cleared — normal ERP matching will be used');
     } catch (e) {
         // toast shown by apiCall
@@ -796,14 +1181,16 @@ async function restorePreviousBom() {
         if (components.length > 0) {
             const input = document.getElementById('previousArticleId');
             if (input) input.value = data.article_id || '';
-            const desc = data.description ? ` — ${data.description}` : '';
-            showPreviousBomInfo(`Previous BOM ${data.article_id || ''}${desc}: ${components.length} components loaded. ` +
-                `Process BOM will match against this BOM.`);
+            showPreviousBomInfo(data.article_id || '', data.description, components.length);
         }
     } catch (e) {
         // No previous BOM — ignore
     }
 }
+
+// ========================================================================
+// Process BOM
+// ========================================================================
 
 async function processBom() {
     // Collect mapping (supports multiple columns per standard field)
@@ -822,6 +1209,7 @@ async function processBom() {
     // Validate: Description is required
     if (!mapping['Description']) {
         toast.warning('Please map the Description column (required)');
+        if (openStep !== 3) showStep(3);
         return;
     }
 
@@ -841,3 +1229,6 @@ async function processBom() {
         hideLoading();
     }
 }
+
+// First paint of the stepper (no file yet)
+refreshUploadUi();

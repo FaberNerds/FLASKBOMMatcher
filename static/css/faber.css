@@ -1,0 +1,518 @@
+/* ========================================
+   FABER HUISSTIJL - tokens and shared recipes
+   Source: design system "Faber Huisstijl" (project/tokens.json v2, components/bundle.css),
+   direction "ontwerp 296" on the 170 page: flat light blue-grey, matte glass, steel + citroen.
+   Load this file before main.css; main.css maps its older variables onto these tokens.
+   ======================================== */
+
+:root {
+    /* Colour */
+    --page: #e8ecf2;            /* 170 "Glazen kaarten": flat light blue-grey, the page background */
+    --surface: #ffffff;
+    --backdrop: #b9c6e0;
+    --surface-glass: rgba(255, 255, 255, 0.64);
+    --surface-glass-strong: rgba(255, 255, 255, 0.85);
+    --surface-raised: #ffffff;
+    --surface-sunken: #eef1f6;
+    --line: rgba(255, 255, 255, 0.85);
+    --line-solid: #e3e5ea;
+    --line-control: rgba(40, 44, 60, 0.22);
+    --line-control-strong: rgba(40, 44, 60, 0.5);   /* the 3:1 variant the brand book allows */
+    --ink: #16181d;
+    --ink-muted: #474b56;
+    --ink-nav: #3a3d47;
+    --steel: #2f4a8a;
+    --steel-hover: #263f7a;
+    --on-steel: #ffffff;
+    --steel-soft: #e4e7f0;
+    --link: var(--steel);
+    --citroen: #fde047;
+    --on-citroen: #1b1c20;
+    --amber: #f4b844;
+    --on-amber: #1b1c20;
+    --gold: #945a06;
+    --gold-soft: #f3ebdf;
+    --sky: #0369a1;
+    --sky-soft: #deecf3;
+    --slate: #475569;
+    --slate-soft: #e7e9ec;
+    --brand-blue: #0000cc;
+    --on-brand-blue: #ffffff;
+    --copper: #9a4a12;
+    --copper-soft: #f7e8dc;
+    --on-copper: #ffffff;
+    --success: #126b35;
+    --success-soft: #dcf5e6;
+    --live: #22c55e;
+    --danger: #bf2318;
+    --danger-soft: #fbe4e1;
+    --warning: #8a5300;
+    --warning-soft: #f8ebd3;
+    --focus: var(--steel);
+
+    /* Type */
+    --font-display: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+
+    /* Space (4px grid) */
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 24px;
+    --space-6: 28px;
+    --space-7: 48px;
+
+    /* Radius */
+    --radius-sm: 5px;
+    --radius-md: 14px;
+    --radius-lg: 20px;
+    --radius-xl: 22px;
+    --radius-pill: 999px;
+
+    /* Shadow */
+    --shadow-glass: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(0, 0, 0, 0.04), 0 10px 30px rgba(30, 32, 50, 0.10);
+    --shadow-bar: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(0, 0, 0, 0.05), 0 10px 30px rgba(30, 32, 50, 0.12);
+    --shadow-lens: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 -1px 1px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.12);
+    --shadow-float: 0 8px 24px rgba(10, 11, 38, 0.16), 0 1px 2px rgba(10, 11, 38, 0.12);
+
+    /* Blur */
+    --blur-glass: 28px;
+    --blur-bar: 30px;
+
+    /* Size */
+    --control-sm: 30px;
+    --control-md: 38px;
+    --field-height: 46px;
+    --masthead-height: 60px;
+    --backdrop-size: 680px;
+}
+
+/* Page: flat light blue-grey (design 170 "Glazen kaarten"), no corner circle; the glass panels sit on it */
+.fx-page {
+    position: relative;
+    isolation: isolate;
+    background: var(--page);
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+@media print {
+    .fx-page {
+        background: #ffffff;
+    }
+}
+
+/* Glass: the shared recipe */
+.fx-glass {
+    background: var(--surface-glass);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-glass);
+    -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(170%);
+    backdrop-filter: blur(var(--blur-glass)) saturate(170%);
+}
+
+/* Numbers: Plex Mono with tabular figures */
+.fx-mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Masthead: the floating glass bar */
+.fx-mast-wrap {
+    position: sticky;
+    top: 14px;
+    z-index: 200;
+    margin: 14px 20px 0;
+}
+
+.fx-mast {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    min-height: var(--masthead-height);
+    padding: 0 12px 0 22px;
+    border-radius: var(--radius-xl);
+    background: var(--surface-glass);
+    border: 1px solid var(--line);
+    box-shadow: var(--shadow-bar);
+    -webkit-backdrop-filter: blur(var(--blur-bar)) saturate(180%);
+    backdrop-filter: blur(var(--blur-bar)) saturate(180%);
+    color: var(--ink);
+}
+
+.fx-mast-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    color: inherit;
+    text-decoration: none;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+}
+
+.fx-mast-logo {
+    display: block;
+    height: 28px;
+    width: auto;
+}
+
+.fx-mast-tool {
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 20px;
+    font-weight: 650;
+    padding-left: 14px;
+    border-left: 1px solid var(--line-control);
+    white-space: nowrap;
+    color: var(--ink);
+}
+
+.fx-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    flex: 1;
+    min-width: 0;
+}
+
+.fx-nav a {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: 36px;
+    padding: 0 14px;
+    border-radius: var(--radius-pill);
+    color: var(--ink-nav);
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.fx-nav a:hover {
+    color: var(--ink);
+    background: var(--surface-glass);
+}
+
+.fx-nav a[aria-current="page"] {
+    color: var(--ink);
+    font-weight: 650;
+    background: var(--surface-glass-strong);
+    box-shadow: var(--shadow-lens);
+}
+
+.fx-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: var(--radius-pill);
+    background: var(--amber);
+    color: var(--on-amber);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1;
+    font-weight: 600;
+}
+
+.fx-mast-status {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink-nav);
+    white-space: nowrap;
+}
+
+.fx-mast-status::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--live);
+}
+
+.fx-mast-status.failed::before {
+    background: var(--danger);
+}
+
+.fx-mast-status[hidden] {
+    display: none;
+}
+
+.fx-mast-actions {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+}
+
+/* Icons: 16px line icons in currentColor */
+.fx-icon {
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    vertical-align: -3px;
+}
+
+/* Glass pill button (Delta sync in the masthead) */
+.fx-btn-glass {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    height: var(--control-md);
+    padding: 0 14px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--line);
+    background: var(--surface-glass-strong);
+    color: var(--steel);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: var(--shadow-lens);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+}
+
+.fx-btn-glass:hover:not(:disabled) {
+    background: var(--surface-raised);
+}
+
+.fx-btn-glass:disabled {
+    cursor: progress;
+}
+
+/* Chips: filter toggles, the active one is citroen. Real radio / checkbox inputs inside a label. */
+.fx-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+}
+
+.fx-chip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    height: var(--control-sm);
+    padding: 0 var(--space-3);
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--line-control);
+    background: transparent;
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1;
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+    user-select: none;
+}
+
+.fx-chip:hover {
+    background: var(--surface-glass-strong);
+}
+
+.fx-chip input {
+    position: absolute;
+    opacity: 0;
+    width: 1px;
+    height: 1px;
+    margin: 0;
+    pointer-events: none;
+}
+
+.fx-chip[aria-pressed="true"],
+.fx-chip[aria-current="page"],
+.fx-chip.active,
+.fx-chip:has(input:checked) {
+    background: var(--citroen);
+    border-color: var(--citroen);
+    color: var(--on-citroen);
+}
+
+.fx-chip:has(input:focus-visible) {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+/* Stat tiles (KPIs): separate glass tiles with a tinted icon square */
+.fx-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+}
+
+.fx-stat {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    border-radius: var(--radius-lg);
+    min-width: 0;
+}
+
+.fx-stat-icon {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+}
+
+.fx-stat-text {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.fx-stat-label {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink-muted);
+}
+
+.fx-stat-value {
+    font-family: var(--font-display);
+    font-size: 22px;
+    line-height: 28px;
+    font-weight: 650;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.fx-stat-sub {
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+}
+
+.fx-tone-steel .fx-stat-icon { background: var(--steel-soft); color: var(--steel); }
+.fx-tone-steel .fx-stat-sub { color: var(--steel); }
+.fx-tone-gold .fx-stat-icon { background: var(--gold-soft); color: var(--gold); }
+.fx-tone-gold .fx-stat-sub { color: var(--gold); }
+.fx-tone-sky .fx-stat-icon { background: var(--sky-soft); color: var(--sky); }
+.fx-tone-sky .fx-stat-sub { color: var(--sky); }
+.fx-tone-slate .fx-stat-icon { background: var(--slate-soft); color: var(--slate); }
+.fx-tone-slate .fx-stat-sub { color: var(--slate); }
+
+/* Page heading */
+.fx-page-head {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-4);
+    flex-wrap: wrap;
+}
+
+.fx-page-head-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.fx-heading {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: 28px;
+    line-height: 34px;
+    font-weight: 650;
+    letter-spacing: -0.3px;
+    color: var(--ink);
+}
+
+.fx-page-sub {
+    margin: 0;
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--ink-muted);
+}
+
+/* Slots A / B in compares */
+.fx-slot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.fx-slot-a { background: var(--steel); color: var(--on-steel); }
+.fx-slot-b { background: var(--copper); color: var(--on-copper); }
+
+/* Link that looks like a link (also on a <button>) */
+.fx-link {
+    background: none;
+    border: 0;
+    padding: 0;
+    font: inherit;
+    color: var(--link);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    border-radius: var(--radius-sm);
+}
+
+/* Keyboard hint */
+.fx-kbd {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 16px;
+    padding: 1px 6px;
+    border: 1px solid var(--line-control);
+    border-radius: var(--radius-sm);
+    color: var(--ink-muted);
+    white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+    .fx-mast-wrap {
+        margin: 10px 12px 0;
+        top: 10px;
+    }
+
+    .fx-mast {
+        flex-wrap: wrap;
+        gap: 8px 16px;
+        padding: 10px 12px;
+    }
+
+    .fx-mast-tool {
+        display: none;
+    }
+
+    .fx-nav {
+        order: 3;
+        flex-basis: 100%;
+        overflow-x: auto;
+    }
+
+    .fx-mast-status {
+        margin-left: auto;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        transition: none !important;
+        animation-duration: 0.01ms !important;
+    }
+}

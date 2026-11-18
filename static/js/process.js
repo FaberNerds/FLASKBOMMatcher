@@ -1,7 +1,9 @@
 /**
  * BOM Matcher - Process Page JavaScript
- * Split-panel layout with synchronized scrolling, MPN/parameter highlights,
- * full-screen row detail modal, MPNfree selection, and manual search.
+ * One table per BOM line: customer BOM columns, the ERP match and the parameter indicators,
+ * with auto-fit zoom, MPN/parameter highlights, MPNfree selection and Copy/Delete modes.
+ * Clicking a line opens a panel directly under it (design mt-01d): the current match with
+ * Remove match / Accept suggestion, the candidates with Use, and a manual ERP search.
  */
 
 let bomData = null;
@@ -9,58 +11,15 @@ let matchResults = {};
 let mpnfreeResults = {};
 let selections = {};
 let selectedRow = null;
-let activeModal = null;
 let copyMode = false;
 let deleteMode = false;
 let deletedRows = new Set();
-let modalSortColumn = null;
-let modalSortAsc = true;
-let modalSuggestions = [];
-let modalRowIndex = null;
 let descColumnWidth = null;
+let statusFilter = 'all';
 
 // Previous-version (Exact) BOM, keyed by FaberNr → full old-BOM line.
 // Drives the green "on old BOM" checkmark and its hover tooltip.
 let previousBomByFaberNr = new Map();
-
-// ========================================================================
-// Zoom Control
-// ========================================================================
-
-const ZOOM_KEY = 'bomMatcherZoom';
-let currentZoom = 100;
-
-function getDefaultZoom() {
-    const w = window.screen.width;
-    if (w <= 1920) return 70;
-    if (w <= 2560) return 85;
-    return 100;
-}
-
-function applyZoom(percent) {
-    currentZoom = Math.max(60, Math.min(120, percent));
-    const panel = document.getElementById('splitPanel');
-    if (panel) panel.style.zoom = (currentZoom / 100).toString();
-    const label = document.getElementById('zoomLevel');
-    if (label) label.textContent = currentZoom + '%';
-    localStorage.setItem(ZOOM_KEY, currentZoom);
-    requestAnimationFrame(() => { if (typeof syncRowHeights === 'function') syncRowHeights(); });
-}
-
-function adjustZoom(delta) {
-    applyZoom(currentZoom + delta);
-}
-
-function resetZoom() {
-    localStorage.removeItem(ZOOM_KEY);
-    applyZoom(getDefaultZoom());
-}
-
-function initZoom() {
-    const saved = localStorage.getItem(ZOOM_KEY);
-    currentZoom = saved ? parseInt(saved, 10) : getDefaultZoom();
-    applyZoom(currentZoom);
-}
 
 /**
  * Get a mapped value from a row, supporting multi-column mappings.
@@ -74,8 +33,13 @@ function getMappedValue(row, mappingValue) {
     return String(row[mappingValue] || '');
 }
 
-// Column order for left table (customer BOM)
+// Column order for the customer BOM part of the table
 const leftColumns = ['Description', 'MPN', 'Manufacturer', 'Quantity', 'Refdes'];
+const leftColumnLabels = { Description: 'Description', MPN: 'MPN', Manufacturer: 'Manufacturer', Quantity: 'Qty', Refdes: 'Refdes' };
+
+// ERP match columns (13) and parameter columns (5)
+const ERP_COLUMN_COUNT = 13;
+const PARAM_COLUMN_COUNT = 5;
 
 // ========================================================================
 // UI State Persistence (sessionStorage for client-only state)
@@ -107,14 +71,16 @@ function restoreUiState() {
 // ========================================================================
 
 async function loadBomData() {
-    initZoom();
     showLoading();
     try {
+        // Parameter settings (package aliases/tags) load alongside, so the first render has the indicators
+        const paramSettings = (typeof ensureParamSettings === 'function') ? ensureParamSettings() : Promise.resolve();
         const data = await apiCall('/api/bom-data');
         bomData = data;
 
         // Load the previous-version (Exact) BOM for the green-checkmark feature
         await loadPreviousBom();
+        await paramSettings;
 
         // Restore server-side state (matches, mpnfree, selections)
         if (data.matches && Object.keys(data.matches).length > 0) {
@@ -138,12 +104,8 @@ async function loadBomData() {
         // Restore client-only UI state from sessionStorage
         restoreUiState();
 
-        document.getElementById('bomName').textContent = data.name || 'Untitled';
-        document.getElementById('bomStats').textContent = `${data.total_rows} rows`;
-
+        renderHeader(data);
         renderTables();
-        setupSyncScroll();
-        window.addEventListener('resize', syncRowHeights);
 
         // In previous-BOM mode, run the match automatically when none exists yet
         // (pressing "Process BOM" is expected to match against the old BOM right away).
@@ -155,6 +117,21 @@ async function loadBomData() {
         toast.error('Failed to load BOM data. Go back and upload a file.');
     } finally {
         hideLoading();
+    }
+}
+
+/** File name as the page title, the customer as a gold pill (only when one is set). */
+function renderHeader(data) {
+    const name = data.name || 'Untitled';
+    const title = document.getElementById('bomName');
+    title.textContent = name;
+    title.title = `${name} · ${data.total_rows || 0} rows`;
+
+    const pill = document.getElementById('klantPill');
+    const klantNr = String(data.klant_nr || '').trim();
+    if (pill) {
+        pill.textContent = klantNr ? `Klant ${klantNr}` : '';
+        pill.hidden = !klantNr;
     }
 }
 
@@ -246,69 +223,282 @@ function hidePrevBomTooltip() {
 }
 
 // ========================================================================
-// Synchronized Scrolling
+// Scroll position (one scroll container: the white sheet)
 // ========================================================================
-
-function setupSyncScroll() {
-    const leftScroll = document.getElementById('leftScroll');
-    const rightScroll = document.getElementById('rightScroll');
-    const paramsScroll = document.getElementById('paramsScroll');
-    let syncing = false;
-
-    function syncAll(source) {
-        if (syncing) return;
-        syncing = true;
-        const top = source.scrollTop;
-        if (source !== leftScroll) leftScroll.scrollTop = top;
-        if (source !== rightScroll) rightScroll.scrollTop = top;
-        if (paramsScroll && source !== paramsScroll) paramsScroll.scrollTop = top;
-        syncing = false;
-    }
-
-    leftScroll.addEventListener('scroll', () => syncAll(leftScroll));
-    rightScroll.addEventListener('scroll', () => syncAll(rightScroll));
-    if (paramsScroll) {
-        paramsScroll.addEventListener('scroll', () => syncAll(paramsScroll));
-    }
-}
 
 // Capture the current scroll position BEFORE an async action so it can be restored after
 // renderTables() rebuilds the DOM (the rebuild + select focus change otherwise jumps scroll).
 function captureScroll() {
-    const l = document.getElementById('leftScroll');
-    return l ? { top: l.scrollTop, left: l.scrollLeft } : null;
+    const sheet = document.getElementById('matchSheet');
+    return sheet ? { top: sheet.scrollTop, left: sheet.scrollLeft } : null;
 }
 
 function restoreScroll(saved) {
     if (!saved) return;
-    // rAF so we restore after syncRowHeights()'s height reset/relayout has settled.
+    // rAF so we restore after the re-render and the auto-fit have settled.
     requestAnimationFrame(() => {
-        const left = document.getElementById('leftScroll');
-        const right = document.getElementById('rightScroll');
-        const params = document.getElementById('paramsScroll');
-        if (left) { left.scrollTop = saved.top; left.scrollLeft = saved.left; }
-        if (right) right.scrollTop = saved.top;   // vertical is synced; horizontal is per-pane
-        if (params) params.scrollTop = saved.top;
+        const sheet = document.getElementById('matchSheet');
+        if (sheet) { sheet.scrollTop = saved.top; sheet.scrollLeft = saved.left; }
     });
 }
 
 // ========================================================================
-// Render Tables
+// Auto-fit zoom: measure at 100%, zoom = available / needed, never below 60%
 // ========================================================================
 
-function renderTables() {
-    if (!bomData) return;
+const MIN_TABLE_ZOOM = 0.6;
+let currentTableZoom = 1;
 
-    // Preserve scroll positions before rebuilding the DOM
-    const leftScroll = document.getElementById('leftScroll');
-    const rightScroll = document.getElementById('rightScroll');
-    const paramsScroll = document.getElementById('paramsScroll');
-    const savedScrollTop = leftScroll ? leftScroll.scrollTop : 0;
+function fitMatchTable() {
+    const sheet = document.getElementById('matchSheet');
+    const table = document.getElementById('matchTable');
+    if (!sheet || !table) return;
+    const keepTop = sheet.scrollTop;
+    const keepLeft = sheet.scrollLeft;
 
-    const mapping = bomData.column_mapping || {};
-    const rows = bomData.rows || [];
+    // The open row panel must not take part in the measurement
+    const panelBox = table.querySelector('.xpanel');
+    if (panelBox) panelBox.style.display = 'none';
 
-    // Build mapped columns for left table
+    table.style.zoom = 1;
+    table.style.width = 'auto';
+    const needed = table.offsetWidth;
+    const available = sheet.clientWidth;
+    if (!needed || !available || needed <= available) {
+        table.style.width = '100%';
+        currentTableZoom = 1;
+    } else {
+        let z = Math.max(MIN_TABLE_ZOOM, available / needed);
+        table.style.width = needed + 'px';
+        table.style.zoom = z.toFixed(3);
+        // Small text does not scale exactly with zoom: shrink a little more until the table really fits.
+        for (let i = 0; i < 4 && z > MIN_TABLE_ZOOM; i++) {
+            const w = table.getBoundingClientRect().width;
+            if (w <= available + 0.5) break;
+            z = Math.max(MIN_TABLE_ZOOM, z * available / w - 0.002);
+            table.style.zoom = z.toFixed(3);
+        }
+        currentTableZoom = z;
+    }
+    if (panelBox) panelBox.style.display = '';
+    sizePanel();
+    sheet.scrollTop = keepTop;
+    sheet.scrollLeft = keepLeft;
+}
+
+/** The open row panel: the visible width of the sheet, sticky left, text back at 100%. */
+function sizePanel() {
+    const sheet = document.getElementById('matchSheet');
+    const box = sheet && sheet.querySelector('.xpanel');
+    if (!box) return;
+    const td = box.closest('td');
+    box.style.zoom = (1 / (currentTableZoom || 1)).toFixed(4);
+    const visible = Math.min(sheet.clientWidth, td.getBoundingClientRect().width);
+    box.style.width = Math.max(600, Math.floor(visible) - 1) + 'px';
+}
+
+let _fitFrame = 0;
+function scheduleFit() {
+    cancelAnimationFrame(_fitFrame);
+    _fitFrame = requestAnimationFrame(fitMatchTable);
+}
+
+window.addEventListener('resize', scheduleFit);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(scheduleFit);
+
+// ========================================================================
+// Cell formatting (house style: numbers right in mono, Dutch notation, — for missing)
+// ========================================================================
+
+const NIL = '<span class="nil">—</span>';
+
+function isBlank(v) {
+    return v === null || v === undefined || String(v).trim() === '';
+}
+
+function toNumber(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+    return isFinite(n) ? n : null;
+}
+
+const _nlQty = new Intl.NumberFormat('nl-NL', { maximumFractionDigits: 2 });
+const _nlPrice = new Intl.NumberFormat('nl-NL', { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+
+function fmtQty(n) { return _nlQty.format(n); }
+
+function textCell(value, clipClass) {
+    if (isBlank(value)) return `<td>${NIL}</td>`;
+    const v = escapeHtml(value);
+    if (clipClass) return `<td><span class="clip ${clipClass}" title="${v}">${v}</span></td>`;
+    return `<td>${v}</td>`;
+}
+
+function monoCell(value) {
+    if (isBlank(value)) return `<td>${NIL}</td>`;
+    return `<td class="fx-mono">${escapeHtml(value)}</td>`;
+}
+
+function numCell(value) {
+    const n = toNumber(value);
+    if (n === null) return `<td class="fx-num">${NIL}</td>`;
+    return `<td class="fx-num fx-mono">${fmtQty(n)}</td>`;
+}
+
+/** Kostprijs as '€ 0,0000'; it comes in as 0 when Exact has no cost price, so 0 shows as missing. */
+function priceHtml(value) {
+    const n = toNumber(value);
+    if (n === null || n === 0) return NIL;
+    return `€ ${_nlPrice.format(n)}`;
+}
+
+function priceCell(value) {
+    const html = priceHtml(value);
+    return html === NIL ? `<td class="fx-num">${NIL}</td>` : `<td class="fx-num fx-mono">${html}</td>`;
+}
+
+/** Voorraad: Dutch notation, a red badge when out of stock. */
+function stockHtml(value) {
+    const n = toNumber(value);
+    if (n === null) return NIL;
+    if (n <= 0) return `<span class="fx-badge fx-badge-danger fx-badge-mono" title="Out of stock">✖ ${fmtQty(n)}</span>`;
+    return fmtQty(n);
+}
+
+function stockCell(value) {
+    const n = toNumber(value);
+    const html = stockHtml(value);
+    return (n === null || n <= 0) ? `<td class="fx-num">${html}</td>` : `<td class="fx-num fx-mono">${html}</td>`;
+}
+
+const MOUNTING_TONES = { SMD: 'sky', HAND: 'gold', PHM: 'slate', PCB: 'steel' };
+
+function mountingBadge(value) {
+    if (isBlank(value)) return NIL;
+    const tone = MOUNTING_TONES[String(value).trim().toUpperCase()] || 'neutral';
+    return `<span class="fx-badge fx-badge-${tone}">${escapeHtml(value)}</span>`;
+}
+
+function mountingCell(value) {
+    return `<td>${mountingBadge(value)}</td>`;
+}
+
+function erpStatusBadge(value) {
+    if (isBlank(value)) return NIL;
+    const s = String(value).trim();
+    const lower = s.toLowerCase();
+    if (lower === 'actief') return `<span class="fx-badge fx-badge-success">✓ ${escapeHtml(s)}</span>`;
+    if (lower === 'vervallen' || lower === 'geblokkeerd' || lower === 'blocked') {
+        return `<span class="fx-badge fx-badge-danger">✖ ${escapeHtml(s)}</span>`;
+    }
+    return `<span class="fx-badge fx-badge-neutral">${escapeHtml(s)}</span>`;
+}
+
+function erpStatusCell(value) {
+    return `<td>${erpStatusBadge(value)}</td>`;
+}
+
+const SEARCH_METHOD_LABELS = {
+    mpn: 'MPN',
+    ipn_verify: 'IPN',
+    description: 'Description',
+    parameterized: 'Parameters',
+    previous_mpn: 'Previous BOM, MPN',
+    previous_param: 'Previous BOM, parameters',
+    previous_none: 'Previous BOM',
+    skipped: 'Skipped',
+    error: 'Error',
+};
+
+/** The status badge of a line: ✓ Matched / ⚠ Partial / ✖ No match / ✕ Deleted, or '' when not matched yet. */
+function statusBadge(state) {
+    const parts = [];
+    if (state.sel.fabernr) {
+        parts.push('Selected by hand');
+    } else if (state.match) {
+        parts.push(SEARCH_METHOD_LABELS[state.match.search_method] || state.match.search_method || 'No search');
+        const score = state.displayItem ? state.displayItem._similarity_score : undefined;
+        if (score !== undefined && score !== null) parts.push(`${Math.round(score)}%`);
+    }
+    const tip = escapeHtml(parts.join(' · '));
+    switch (state.status) {
+        case 'deleted':
+            return `<span class="fx-badge fx-badge-slate row-status" title="Match removed">✕ Deleted</span>`;
+        case 'matched':
+            return `<span class="fx-badge fx-badge-success row-status" title="${tip}">✓ Matched</span>`;
+        case 'partial':
+            return `<span class="fx-badge fx-badge-warning row-status" title="${tip}">⚠ Partial</span>`;
+        case 'nomatch':
+            return `<span class="fx-badge fx-badge-danger row-status" title="${tip}">✖ No match</span>`;
+        default:
+            return '';
+    }
+}
+
+function rowStatusCell(state) {
+    const badge = statusBadge(state);
+    return badge ? `<td class="pin2">${badge}</td>` : `<td class="pin2" title="Not matched yet">${NIL}</td>`;
+}
+
+// ========================================================================
+// Match state per line
+// ========================================================================
+
+/** The match, the assigned FaberNr, the item to show and the line status for one BOM row. */
+function getRowState(rowIndex) {
+    const strIdx = String(rowIndex);
+    const match = matchResults[strIdx];
+    const sel = selections[strIdx] || {};
+
+    // Determine match state
+    let fabernr = '';
+    let confidence = 'none';
+    let searchMethod = '';
+    if (sel.fabernr) {
+        fabernr = sel.fabernr;
+        confidence = 'high';
+    } else if (match && match.auto_selected) {
+        fabernr = match.auto_selected.FaberNr || '';
+        confidence = match.confidence || 'none';
+        searchMethod = match.search_method || '';
+    } else if (match && match.display_suggestion) {
+        // Partial match: show suggestion but don't assign fabernr
+        confidence = match.confidence || 'none';
+        searchMethod = match.search_method || '';
+    }
+
+    // Which item to display: manually selected suggestion, auto_selected, or display_suggestion
+    let displayItem = null;
+    if (sel.fabernr && match && match.suggestions) {
+        displayItem = match.suggestions.find(s => s.FaberNr === sel.fabernr) || null;
+    }
+    if (!displayItem && match && match.auto_selected) {
+        displayItem = match.auto_selected;
+    }
+    if (!displayItem && match && match.display_suggestion) {
+        displayItem = match.display_suggestion;
+    }
+
+    let status = '';
+    if (deletedRows.has(rowIndex)) {
+        status = 'deleted';
+    } else if (confidence === 'high') {
+        status = 'matched';
+    } else if (confidence === 'medium' || confidence === 'low') {
+        status = 'partial';
+    } else if (match && match.confidence === 'none') {
+        status = 'nomatch';
+    }
+
+    return { match, sel, fabernr, confidence, searchMethod, displayItem, status };
+}
+
+// ========================================================================
+// Render the table
+// ========================================================================
+
+function getMappedColumns() {
+    const mapping = (bomData && bomData.column_mapping) || {};
     const mappedCols = [];
     for (const stdCol of leftColumns) {
         const actualCol = mapping[stdCol];
@@ -316,280 +506,211 @@ function renderTables() {
             mappedCols.push({ std: stdCol, actual: actualCol });
         }
     }
+    return mappedCols;
+}
 
-    const hasMpnfree = previousBomMode() || Object.keys(mpnfreeResults).length > 0;
+function renderTableHead(mappedCols, hasMpnfree) {
+    const customerCount = mappedCols.length + (hasMpnfree ? 1 : 0);
 
-    // --- Left Table Header ---
-    const leftHead = document.getElementById('leftTableHead');
-    let lhHtml = '<tr><th style="width: 36px;">#</th>';
+    let grp = '<tr class="grp"><th class="pin1"></th><th class="pin2"></th>';
+    if (customerCount > 0) grp += `<th colspan="${customerCount}">Customer BOM</th>`;
+    grp += `<th colspan="${ERP_COLUMN_COUNT}" class="g-start">ERP match</th>`;
+    grp += `<th colspan="${PARAM_COLUMN_COUNT}" class="g-start">Params</th></tr>`;
+
+    let cols = '<tr class="cols"><th class="pin1 fx-num">#</th><th class="pin2">Status</th>';
     for (const col of mappedCols) {
-        if (col.std === 'Refdes' && hasMpnfree) {
-            lhHtml += '<th style="width: 80px;">MPNfree</th>';
-        }
+        const label = escapeHtml(leftColumnLabels[col.std] || col.std);
         if (col.std === 'Description') {
-            lhHtml += `<th class="resizable-th desc-th">${escapeHtml(col.std)}<div class="col-resize-handle" data-col="desc"></div></th>`;
+            cols += `<th class="resizable-th desc-th">${label}<div class="col-resize-handle" data-col="desc" title="Drag to resize the description columns"></div></th>`;
+        } else if (col.std === 'Quantity') {
+            cols += `<th class="fx-num" title="Quantity">${label}</th>`;
         } else {
-            lhHtml += `<th>${escapeHtml(col.std)}</th>`;
+            cols += `<th>${label}</th>`;
         }
     }
-    lhHtml += '</tr>';
-    leftHead.innerHTML = lhHtml;
+    if (hasMpnfree) cols += '<th>MPNfree</th>';
+    cols += '<th class="g-start">FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>KlantNaam</th>' +
+        '<th>Mounting</th><th>Status</th><th class="fx-num">Kostprijs</th><th class="fx-num">Voorraad</th>' +
+        '<th class="fx-num">Verbruik</th><th class="fx-num">InBestelling</th><th>KlantNr</th><th>Type</th>';
+    cols += '<th class="param-col g-start" title="Value (Ω resistor, -||- capacitor)">Value</th>' +
+        '<th class="param-col" title="Tolerance">%</th>' +
+        '<th class="param-col" title="Voltage">V</th>' +
+        '<th class="param-col" title="Power">P</th>' +
+        '<th class="param-col" title="Package">Package</th></tr>';
 
-    // --- Right Table Header ---
-    const rightHead = document.getElementById('rightTableHead');
-    rightHead.innerHTML = '<tr><th>FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>KlantNaam</th><th>Mounting</th><th>Status</th><th>Kostprijs</th><th>Voorraad</th><th>Verbruik</th><th>InBestelling</th><th>KlantNr</th><th>Type</th></tr>';
+    document.getElementById('matchTableHead').innerHTML = grp + cols;
+}
 
-    // --- Build body rows ---
-    let leftHtml = '';
-    let rightHtml = '';
+/** Customer BOM cells of one line (plus the MPNfree dropdown at the end when that mode is on). */
+function renderCustomerCells(rowIndex, row, mappedCols, hasMpnfree, state) {
+    let html = '';
+    const hlItem = state.match && (state.match.auto_selected || state.match.display_suggestion);
+    for (const col of mappedCols) {
+        const cellValue = getMappedValue(row, col.actual);
+        if (col.std === 'Description') {
+            if (isBlank(cellValue)) { html += `<td>${NIL}</td>`; continue; }
+            // Highlight BOM description for MPNfree rows with parameterized match results
+            let inner;
+            if (hasMpnfree && getMpnfreeValue(rowIndex) && hlItem && hlItem._bom_highlights && hlItem._bom_highlights.length > 0) {
+                inner = applyHighlights(cellValue, hlItem._bom_highlights);
+            } else {
+                inner = escapeHtml(cellValue);
+            }
+            html += `<td><span class="clip clip-desc" title="${escapeHtml(cellValue)}">${inner}</span></td>`;
+        } else if (col.std === 'MPN') {
+            if (isBlank(cellValue)) { html += `<td>${NIL}</td>`; continue; }
+            html += `<td class="fx-mono" title="${escapeHtml(cellValue)}"><span class="mpn-clickable" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(cellValue)}</span></td>`;
+        } else if (col.std === 'Quantity') {
+            html += isBlank(cellValue) ? `<td class="fx-num">${NIL}</td>` : `<td class="fx-num fx-mono">${escapeHtml(cellValue)}</td>`;
+        } else if (col.std === 'Manufacturer') {
+            html += textCell(cellValue, 'clip-m');
+        } else if (col.std === 'Refdes') {
+            html += textCell(cellValue, 'clip-s');
+        } else {
+            html += textCell(cellValue);
+        }
+    }
+    if (hasMpnfree) {
+        html += `<td class="mpnfree-cell">${renderMpnfreeDropdown(rowIndex)}</td>`;
+    }
+    return html;
+}
 
-    let matchedCount = 0, partialCount = 0, noMatchCount = 0, paramCount = 0;
+/** The 13 ERP match cells of one line. */
+function renderErpCells(rowIndex, row, state) {
+    const auto = state.displayItem;
+    if (!auto) {
+        return `<td class="g-start">${NIL}</td>` +
+            `<td>${NIL}</td>`.repeat(6) +
+            `<td class="fx-num">${NIL}</td>`.repeat(4) +
+            `<td>${NIL}</td>`.repeat(2);
+    }
+    const mapping = bomData.column_mapping || {};
+    let html = '';
 
+    // FaberNr: assigned (steel, with the previous-BOM check) or only a suggestion (italic, muted)
+    if (state.fabernr) {
+        html += `<td class="g-start" data-copy="${escapeHtml(state.fabernr)}"><span class="fnr">${escapeHtml(state.fabernr)}</span>${renderPreviousBomCheck(state.fabernr)}</td>`;
+    } else if (!isBlank(auto.FaberNr)) {
+        html += `<td class="g-start" data-copy="${escapeHtml(auto.FaberNr)}" title="Suggestion, not assigned"><span class="sugg">${escapeHtml(auto.FaberNr)}</span><span class="sugg-note">(suggestion)</span></td>`;
+    } else {
+        html += `<td class="g-start">${NIL}</td>`;
+    }
+
+    // Omschrijving with the parameter highlights
+    if (isBlank(auto.Omschrijving)) {
+        html += `<td>${NIL}</td>`;
+    } else {
+        html += `<td><span class="clip clip-desc" title="${escapeHtml(auto.Omschrijving)}">${renderHighlightedDescription(auto, state.match)}</span></td>`;
+    }
+
+    html += textCell(auto.Manufacturer, 'clip-m');
+    const mpnHtml = renderMpnHighlights(auto, state.match, row, mapping);
+    html += mpnHtml ? `<td class="fx-mono">${mpnHtml}</td>` : `<td>${NIL}</td>`;
+    html += textCell(auto.KlantNaam, 'clip-m');
+    html += mountingCell(auto.Mounting);
+    html += erpStatusCell(auto.Status);
+    html += priceCell(auto.Kostprijs);
+    html += stockCell(auto.Voorraad);
+    html += numCell(auto.Verbruik);
+    html += numCell(auto.InBestelling);
+    html += monoCell(auto.KlantNr);
+    html += textCell(auto.Type, 'clip-t');
+    return html;
+}
+
+function renderTables() {
+    if (!bomData) return;
+
+    // Preserve the scroll position before rebuilding the DOM
+    const saved = captureScroll();
+
+    const rows = bomData.rows || [];
+    const mappedCols = getMappedColumns();
+    const hasMpnfree = previousBomMode() || Object.keys(mpnfreeResults).length > 0;
+    const paramsReady = typeof paramSettingsLoaded === 'function' && paramSettingsLoaded();
+
+    renderTableHead(mappedCols, hasMpnfree);
+
+    let html = '';
     for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
-        const strIdx = String(i);
-        const match = matchResults[strIdx];
-        const sel = selections[strIdx] || {};
+        const state = getRowState(i);
+        const classes = [];
+        if (state.status === 'deleted') classes.push('row-deleted');
+        const selAttr = selectedRow === i ? ' aria-selected="true"' : '';
 
-        // Determine match state
-        let fabernr = '';
-        let confidence = 'none';
-        let searchMethod = '';
-        if (sel.fabernr) {
-            fabernr = sel.fabernr;
-            confidence = 'high';
-        } else if (match && match.auto_selected) {
-            fabernr = match.auto_selected.FaberNr || '';
-            confidence = match.confidence || 'none';
-            searchMethod = match.search_method || '';
-        } else if (match && match.display_suggestion) {
-            // Partial match: show suggestion but don't assign fabernr
-            confidence = match.confidence || 'none';
-            searchMethod = match.search_method || '';
-        }
-
-        // Row class for color coding
-        let rowClass = '';
-        if (deletedRows.has(i)) {
-            rowClass = 'row-deleted';
-        } else if (confidence === 'high') {
-            rowClass = 'row-matched';
-            matchedCount++;
-        } else if (confidence === 'medium' || confidence === 'low') {
-            rowClass = 'row-suggestion';
-            partialCount++;
-        } else if (match && match.confidence === 'none') {
-            rowClass = 'row-nomatch';
-            noMatchCount++;
-        }
-
-        if (searchMethod === 'parameterized') paramCount++;
-
-        const selClass = selectedRow === i ? ' row-selected' : '';
-
-        // --- Left row ---
-        leftHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="selectRow(${i})" ondblclick="showRowDetailModal(${i})">`;
-        leftHtml += `<td style="color: var(--text-muted); font-size: 11px;">${i + 1}</td>`;
-        for (const col of mappedCols) {
-            if (col.std === 'Refdes' && hasMpnfree) {
-                leftHtml += `<td>${renderMpnfreeDropdown(i)}</td>`;
-            }
-            const cellValue = getMappedValue(row, col.actual);
-            // Highlight BOM description for MPNfree rows with parameterized match results
-            const hlItem = (match && match.auto_selected) || (match && match.display_suggestion);
-            if (col.std === 'Description' && hasMpnfree && getMpnfreeValue(i) && hlItem && hlItem._bom_highlights && hlItem._bom_highlights.length > 0) {
-                leftHtml += `<td class="desc-col" title="${escapeHtml(cellValue)}">${applyHighlights(cellValue, hlItem._bom_highlights)}</td>`;
-            } else if (col.std === 'MPN' && cellValue) {
-                leftHtml += `<td title="${escapeHtml(cellValue)}"><span class="mpn-clickable" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(cellValue)}</span></td>`;
-            } else {
-                leftHtml += `<td${col.std === 'Description' ? ' class="desc-col"' : ''} title="${escapeHtml(cellValue)}">${escapeHtml(cellValue)}</td>`;
-            }
-        }
-        leftHtml += '</tr>';
-
-        // --- Right row ---
-        rightHtml += `<tr class="${rowClass}${selClass}" data-row="${i}" onclick="onRightRowClick(${i})" ondblclick="showRowDetailModal(${i})">`;
-
-        // Determine which item to display: manually selected suggestion, auto_selected, or display_suggestion
-        let displayItem = null;
-        if (sel.fabernr && match && match.suggestions) {
-            displayItem = match.suggestions.find(s => s.FaberNr === sel.fabernr);
-        }
-        if (!displayItem && match && match.auto_selected) {
-            displayItem = match.auto_selected;
-        }
-        if (!displayItem && match && match.display_suggestion) {
-            displayItem = match.display_suggestion;
-        }
-
-        if (displayItem) {
-            const auto = displayItem;
-            const descHtml = renderHighlightedDescription(auto, match);
-
-            rightHtml += `<td style="font-family: var(--font-family-mono); font-size: 11px;">${escapeHtml(fabernr)}${renderPreviousBomCheck(fabernr)}</td>`;
-            rightHtml += `<td title="${escapeHtml(auto.Omschrijving || '')}">${descHtml}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.Manufacturer || '')}</td>`;
-            rightHtml += `<td>${renderMpnHighlights(auto, match, row, mapping)}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.KlantNaam || '')}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.Mounting || '')}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.Status || '')}</td>`;
-            rightHtml += `<td>${auto.Kostprijs || 0}</td>`;
-            rightHtml += `<td>${auto.Voorraad || 0}</td>`;
-            rightHtml += `<td>${auto.Verbruik || 0}</td>`;
-            rightHtml += `<td>${auto.InBestelling || 0}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.KlantNr || '')}</td>`;
-            rightHtml += `<td>${escapeHtml(auto.Type || '')}</td>`;
-        } else {
-            rightHtml += '<td>\u2014</td><td>\u2014</td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td>';
-        }
-
-        rightHtml += '</tr>';
+        html += `<tr class="${classes.join(' ')}" data-row="${i}" data-status="${state.status || 'none'}"${selAttr}>`;
+        html += `<td class="pin1 fx-num fx-mono rownum">${i + 1}</td>`;
+        html += rowStatusCell(state);
+        html += renderCustomerCells(i, row, mappedCols, hasMpnfree, state);
+        html += renderErpCells(i, row, state);
+        html += paramsReady ? buildMatcherParamCells(i) : '<td class="pc g-start"></td><td class="pc"></td><td class="pc"></td><td class="pc"></td><td class="pc"></td>';
+        html += '</tr>';
     }
+    const colCount = 2 + mappedCols.length + (hasMpnfree ? 1 : 0) + ERP_COLUMN_COUNT + PARAM_COLUMN_COUNT;
+    html += `<tr class="empty-row" hidden><td colspan="${colCount}" class="table-empty">No lines match the search or the status filter.</td></tr>`;
 
-    document.getElementById('leftTableBody').innerHTML = leftHtml;
-    document.getElementById('rightTableBody').innerHTML = rightHtml;
+    document.getElementById('matchTableBody').innerHTML = html;
 
-    // Update summary badges
-    updateSummaryBadges(matchedCount, partialCount, noMatchCount, paramCount);
+    // The row panel lives inside the table body: put it back under its line
+    if (panel) mountPanel();
 
-    // Sync row heights between left and right tables
-    syncRowHeights();
-
-    // Populate params comparison table
-    if (typeof populateMatcherParamsTable === 'function') {
+    // Parameter indicators: inline above; fill them in once the package settings have loaded
+    if (!paramsReady && typeof populateMatcherParamsTable === 'function') {
         populateMatcherParamsTable();
     }
+    if (typeof initParamIndicatorTooltips === 'function') initParamIndicatorTooltips();
 
-    // Setup column resize handles
+    // Setup the description column resize handle
     setupColumnResize();
+    applyDescColumnWidth(descColumnWidth);
 
-    // Restore description column width if previously resized
-    if (descColumnWidth) {
-        applyDescColumnWidth(descColumnWidth);
-    }
-
-    // Re-apply any active filters
+    // Re-apply any active filters (this also re-fits the table)
     filterTable();
 
     // Persist UI state for reload
     saveUiState();
 
-    // Restore scroll positions after DOM rebuild
-    if (leftScroll) leftScroll.scrollTop = savedScrollTop;
-    if (rightScroll) rightScroll.scrollTop = savedScrollTop;
-    if (paramsScroll) paramsScroll.scrollTop = savedScrollTop;
+    // Restore the scroll position after the DOM rebuild
+    if (saved) {
+        const sheet = document.getElementById('matchSheet');
+        sheet.scrollTop = saved.top;
+        sheet.scrollLeft = saved.left;
+    }
 }
+
+// ========================================================================
+// Column Resize (both description columns share one width)
+// ========================================================================
 
 function applyDescColumnWidth(w) {
-    const px = w + 'px';
-    const leftTh = document.querySelector('#leftTableHead .desc-th');
-    if (leftTh) {
-        leftTh.style.width = px;
-        leftTh.style.minWidth = px;
-        leftTh.style.maxWidth = px;
-    }
-    document.querySelectorAll('#leftTableBody .desc-col').forEach(td => {
-        td.style.width = px;
-        td.style.minWidth = px;
-        td.style.maxWidth = px;
-    });
-    const rightTh = document.querySelector('#rightTableHead th:nth-child(2)');
-    if (rightTh) {
-        rightTh.style.width = px;
-        rightTh.style.minWidth = px;
-        rightTh.style.maxWidth = px;
-    }
-    document.querySelectorAll('#rightTableBody td:nth-child(2)').forEach(td => {
-        td.style.width = px;
-        td.style.minWidth = px;
-        td.style.maxWidth = px;
-    });
+    const table = document.getElementById('matchTable');
+    if (!table) return;
+    if (w) table.style.setProperty('--desc-w', w + 'px');
+    else table.style.removeProperty('--desc-w');
 }
-
-// ========================================================================
-// Sync Row Heights Between Tables
-// ========================================================================
-
-function syncRowHeights() {
-    const leftRows = document.querySelectorAll('#leftTableBody tr');
-    const rightRows = document.querySelectorAll('#rightTableBody tr');
-    const paramsRows = document.querySelectorAll('#paramsTableBody tr');
-    const count = Math.min(leftRows.length, rightRows.length);
-
-    // Reset heights so natural heights can be measured
-    for (let i = 0; i < count; i++) {
-        leftRows[i].style.height = '';
-        rightRows[i].style.height = '';
-        if (paramsRows[i]) paramsRows[i].style.height = '';
-    }
-
-    // Set each trio to the max of the three
-    for (let i = 0; i < count; i++) {
-        let maxH = Math.max(leftRows[i].offsetHeight, rightRows[i].offsetHeight);
-        if (paramsRows[i]) maxH = Math.max(maxH, paramsRows[i].offsetHeight);
-        leftRows[i].style.height = maxH + 'px';
-        rightRows[i].style.height = maxH + 'px';
-        if (paramsRows[i]) paramsRows[i].style.height = maxH + 'px';
-    }
-
-    // Also sync header rows
-    const leftHeadRows = document.querySelectorAll('#leftTableHead tr');
-    const rightHeadRows = document.querySelectorAll('#rightTableHead tr');
-    const paramsHeadRows = document.querySelectorAll('#paramsTable thead tr');
-    if (leftHeadRows.length > 0 && rightHeadRows.length > 0) {
-        leftHeadRows[0].style.height = '';
-        rightHeadRows[0].style.height = '';
-        if (paramsHeadRows[0]) paramsHeadRows[0].style.height = '';
-        let maxHeaderH = Math.max(leftHeadRows[0].offsetHeight, rightHeadRows[0].offsetHeight);
-        if (paramsHeadRows[0]) maxHeaderH = Math.max(maxHeaderH, paramsHeadRows[0].offsetHeight);
-        leftHeadRows[0].style.height = maxHeaderH + 'px';
-        rightHeadRows[0].style.height = maxHeaderH + 'px';
-        if (paramsHeadRows[0]) paramsHeadRows[0].style.height = maxHeaderH + 'px';
-    }
-}
-
-// ========================================================================
-// Column Resize
-// ========================================================================
 
 function setupColumnResize() {
-    const handles = document.querySelectorAll('.col-resize-handle');
+    const handles = document.querySelectorAll('#matchTableHead .col-resize-handle');
     handles.forEach(handle => {
+        handle.addEventListener('click', (e) => e.stopPropagation());
         handle.addEventListener('mousedown', (e) => {
             e.preventDefault();
             e.stopPropagation();
 
-            const th = handle.parentElement;
-            const startX = e.pageX;
-            const startWidth = th.offsetWidth;
+            const clip = document.querySelector('#matchTableBody .clip-desc');
+            const startX = e.clientX;
+            const zoom = currentTableZoom || 1;
+            const startWidth = descColumnWidth || (clip ? clip.offsetWidth : 220);
 
             handle.classList.add('active');
 
-            function onMouseMove(e) {
-                const newWidth = Math.max(60, startWidth + (e.pageX - startX));
+            function onMouseMove(ev) {
+                // The table is zoomed: a screen pixel is 1/zoom table pixels
+                const newWidth = Math.round(Math.max(60, startWidth + (ev.clientX - startX) / zoom));
                 descColumnWidth = newWidth;
-                th.style.width = newWidth + 'px';
-                th.style.minWidth = newWidth + 'px';
-                th.style.maxWidth = newWidth + 'px';
-                // Also update all desc-col cells in both tables
-                document.querySelectorAll('#leftTableBody .desc-col').forEach(td => {
-                    td.style.maxWidth = newWidth + 'px';
-                    td.style.minWidth = newWidth + 'px';
-                    td.style.width = newWidth + 'px';
-                });
-                // Sync right table Description column (2nd column)
-                const rightDescTh = document.querySelector('#rightTableHead th:nth-child(2)');
-                if (rightDescTh) {
-                    rightDescTh.style.width = newWidth + 'px';
-                    rightDescTh.style.minWidth = newWidth + 'px';
-                    rightDescTh.style.maxWidth = newWidth + 'px';
-                }
-                document.querySelectorAll('#rightTableBody td:nth-child(2)').forEach(td => {
-                    td.style.maxWidth = newWidth + 'px';
-                    td.style.minWidth = newWidth + 'px';
-                    td.style.width = newWidth + 'px';
-                });
-                syncRowHeights();
+                applyDescColumnWidth(newWidth);
             }
 
             function onMouseUp() {
@@ -597,6 +718,7 @@ function setupColumnResize() {
                 document.removeEventListener('mousemove', onMouseMove);
                 document.removeEventListener('mouseup', onMouseUp);
                 saveUiState();
+                fitMatchTable();
             }
 
             document.addEventListener('mousemove', onMouseMove);
@@ -635,7 +757,7 @@ function renderMpnfreeDropdown(rowIndex) {
     const yesSelected = value ? 'selected' : '';
     const noSelected = !value ? 'selected' : '';
     const cssClass = value ? 'mpnfree-yes' : 'mpnfree-no';
-    return `<select class="mpnfree-dropdown ${cssClass}" onchange="overrideMpnfree(${rowIndex}, this.value === 'yes')" onclick="event.stopPropagation()">
+    return `<select class="mpnfree-dropdown ${cssClass}" aria-label="MPNfree for line ${rowIndex + 1}" onchange="overrideMpnfree(${rowIndex}, this.value === 'yes')" onclick="event.stopPropagation()" ondblclick="event.stopPropagation()">
         <option value="no" ${noSelected}>No</option>
         <option value="yes" ${yesSelected}>Yes</option>
     </select>`;
@@ -700,7 +822,7 @@ async function selectMpnfree() {
 
 function renderHighlightedDescription(suggestion, match) {
     const desc = suggestion.Omschrijving || '';
-    if (!desc) return '\u2014';
+    if (!desc) return '—';
 
     // For parameterized matches, highlight matched parameters
     const highlights = suggestion._param_highlights;
@@ -711,44 +833,45 @@ function renderHighlightedDescription(suggestion, match) {
     return escapeHtml(desc);
 }
 
-function renderMpnHighlights(suggestion, match, customerRow, mapping) {
-    const customerMpn = getMappedValue(customerRow, mapping.MPN);
-    const erpMpn = suggestion.MPN || '';
-
-    if (!erpMpn) return '';
-
-    // Check for MPN highlights
-    const highlights = suggestion._mpn_highlights;
-    if (highlights && highlights.length > 0) {
-        const hl = highlights[0];
-        const hlClass = hl.match_type === 'exact' ? 'hl-mpn-exact' : 'hl-mpn-partial';
-        return `<span class="mpn-clickable ${hlClass}" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(erpMpn)}</span>`;
-    }
-
-    return `<span class="mpn-clickable" title="Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(erpMpn)}</span>`;
+function normMpn(s) {
+    return String(s || '').replace(/\s+/g, '').toUpperCase();
 }
 
-function renderScore(suggestion, match) {
-    const score = suggestion._similarity_score;
-    if (score !== undefined && score !== null) {
-        const pct = Math.round(score);
-        const color = pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
-        return `<span class="score-bar">
-            <span class="score-bar-fill">
-                <span class="score-bar-fill-inner" style="width: ${pct}%; background: ${color};"></span>
-            </span>
-            ${pct}%
-        </span>`;
-    }
+/**
+ * How the ERP MPN relates to the customer's MPN: 'exact' when it is the same part number
+ * (case and spaces aside, the rule Find IPN uses to assign automatically), 'partial' when one
+ * contains the other or they share most of their start (packaging suffix, -TR), '' otherwise.
+ */
+function mpnMatchType(customerMpn, erpMpn) {
+    const a = normMpn(customerMpn);
+    const b = normMpn(erpMpn);
+    if (!a || !b) return '';
+    if (a === b) return 'exact';
+    const sa = a.replace(/[^A-Z0-9]/g, '');
+    const sb = b.replace(/[^A-Z0-9]/g, '');
+    const shorter = Math.min(sa.length, sb.length);
+    if (shorter < 4) return '';
+    if (sa.includes(sb) || sb.includes(sa)) return 'partial';
+    let common = 0;
+    while (common < shorter && sa[common] === sb[common]) common++;
+    return common >= Math.max(5, Math.ceil(shorter * 0.75)) ? 'partial' : '';
+}
 
-    // For MPN matches, show confidence indicator
-    if (match && match.search_method === 'mpn') {
-        const conf = match.confidence;
-        if (conf === 'high') return '<span style="color: #10b981; font-weight: 600;">Exact</span>';
-        if (conf === 'medium') return '<span style="color: #f59e0b;">Partial</span>';
-    }
+const MPN_MATCH_CLASS = { exact: 'hl-mpn-exact', partial: 'hl-mpn-partial' };
+const MPN_MATCH_TIP = { exact: 'Same MPN as the customer BOM', partial: 'MPN differs from the customer BOM' };
 
-    return '';
+/** An ERP MPN, green underlined when it equals the customer's MPN, amber when it only resembles it. */
+function mpnHtml(erpMpn, customerMpn, extraClass) {
+    const type = mpnMatchType(customerMpn, erpMpn);
+    const cls = ['mpn-clickable', extraClass, MPN_MATCH_CLASS[type]].filter(Boolean).join(' ');
+    const tip = (MPN_MATCH_TIP[type] ? MPN_MATCH_TIP[type] + ' · ' : '') + 'Ctrl+Click: Google | Alt+Click: DigiKey';
+    return `<span class="${cls}" title="${escapeHtml(tip)}">${escapeHtml(erpMpn)}</span>`;
+}
+
+function renderMpnHighlights(suggestion, match, customerRow, mapping) {
+    const erpMpn = suggestion.MPN || '';
+    if (!erpMpn) return '';
+    return mpnHtml(erpMpn, getMappedValue(customerRow, mapping.MPN));
 }
 
 function applyHighlights(text, highlights) {
@@ -772,428 +895,564 @@ function applyHighlights(text, highlights) {
 }
 
 // ========================================================================
-// Summary Badges
+// Copy / Delete modes (toggles, at most one ON)
 // ========================================================================
 
-function updateSummaryBadges(matched, partial, noMatch, param) {
-    const hasResults = matched + partial + noMatch > 0;
-    document.getElementById('summaryBadges').style.display = hasResults ? 'block' : 'none';
-    document.getElementById('filterBar').style.display = hasResults ? 'block' : 'none';
+const MODE_HINTS = {
+    copy: '<b>Copy mode</b> · click a cell to copy its text',
+    'delete': '<b>Delete mode</b> · click a line to remove its ERP match',
+};
 
-    document.getElementById('matchedCount').textContent = matched;
-    document.getElementById('partialCount').textContent = partial;
-    document.getElementById('noMatchCount').textContent = noMatch;
+function setMode(mode) {
+    copyMode = mode === 'copy';
+    deleteMode = mode === 'delete';
 
-    if (param > 0) {
-        document.getElementById('paramBadge').style.display = 'inline-flex';
-        document.getElementById('paramCount').textContent = param;
+    const buttons = [['copyModeBtn', 'Copy', copyMode], ['deleteModeBtn', 'Delete', deleteMode]];
+    for (const [id, name, on] of buttons) {
+        const btn = document.getElementById(id);
+        if (!btn) continue;
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        const label = btn.querySelector('.tlabel');
+        if (label) label.textContent = `${name}: ${on ? 'ON' : 'OFF'}`;
+    }
+
+    // In Copy / Delete mode a click does that action, so the row panel closes
+    if (mode) closePanel();
+
+    const page = document.querySelector('.match-page');
+    if (page) {
+        page.classList.toggle('mode-copy', copyMode);
+        page.classList.toggle('mode-delete', deleteMode);
+    }
+
+    const hint = document.getElementById('modeHint');
+    const hintText = document.getElementById('modeText');
+    if (hint && hintText) {
+        if (mode) {
+            hintText.innerHTML = MODE_HINTS[mode];
+            hint.classList.toggle('is-delete', mode === 'delete');
+            hint.hidden = false;
+        } else {
+            hint.hidden = true;
+        }
     }
 }
 
-// ========================================================================
-// Row Selection — Full-Screen Modal
-// ========================================================================
-
 function toggleCopyMode() {
-    copyMode = !copyMode;
-    const btn = document.getElementById('copyModeBtn');
-    if (btn) {
-        btn.textContent = copyMode ? 'Copy: ON' : 'Copy: OFF';
-        btn.className = copyMode ? 'btn btn-primary' : 'btn btn-outline';
-    }
-    document.getElementById('splitPanel').style.cursor = copyMode ? 'copy' : '';
+    setMode(copyMode ? null : 'copy');
 }
 
 function toggleDeleteMode() {
-    deleteMode = !deleteMode;
-    const btn = document.getElementById('deleteModeBtn');
-    if (btn) {
-        btn.textContent = deleteMode ? 'Delete: ON' : 'Delete: OFF';
-        btn.className = deleteMode ? 'btn btn-danger' : 'btn btn-outline';
-    }
+    setMode(deleteMode ? null : 'delete');
 }
 
-function onRightRowClick(rowIndex) {
-    if (deleteMode) {
-        deleteMatch(rowIndex);
-    } else {
-        selectRow(rowIndex);
-    }
+// ========================================================================
+// Storing one line: Remove match, Accept suggestion, Use, Undo
+// ========================================================================
+
+function cloneJson(v) {
+    return v === undefined || v === null ? null : JSON.parse(JSON.stringify(v));
 }
 
-async function deleteMatch(rowIndex) {
-    const strIdx = String(rowIndex);
-    delete matchResults[strIdx];
-    delete selections[strIdx];
-    deletedRows.add(rowIndex);
+/** Everything needed to put a line back as it was (for Undo). */
+function snapshotRow(rowIndex) {
+    const s = String(rowIndex);
+    return { match: cloneJson(matchResults[s]), sel: cloneJson(selections[s]), deleted: deletedRows.has(rowIndex) };
+}
 
-    try {
-        await apiCall('/api/match/delete', {
-            method: 'POST',
-            body: JSON.stringify({ row_index: rowIndex })
-        });
-        toast.success(`Match removed for row ${rowIndex + 1}`);
-    } catch (e) {
-        // toast shown by apiCall
-    }
+function applyRowLocal(rowIndex, match, sel, deleted) {
+    const s = String(rowIndex);
+    if (match) matchResults[s] = match; else delete matchResults[s];
+    if (sel && Object.keys(sel).length) selections[s] = sel; else delete selections[s];
+    if (deleted) deletedRows.add(rowIndex); else deletedRows.delete(rowIndex);
+}
+
+/** Set a line's match + selection here and on the server, then re-render. Returns true when stored. */
+async function storeRow(rowIndex, match, sel, deleted) {
+    const before = snapshotRow(rowIndex);
+    const saved = captureScroll();
+    applyRowLocal(rowIndex, match, sel, deleted);
     renderTables();
+    restoreScroll(saved);
+    const s = String(rowIndex);
+    try {
+        await apiCall('/api/match/set-row', {
+            method: 'POST',
+            body: JSON.stringify({ row_index: rowIndex, match: matchResults[s] || null, selection: selections[s] || null })
+        });
+        return true;
+    } catch (e) {
+        // toast shown by apiCall; put the line back
+        applyRowLocal(rowIndex, before.match, before.sel, before.deleted);
+        renderTables();
+        restoreScroll(saved);
+        return false;
+    }
+}
+
+// Only the latest action can be undone: an older Undo would overwrite what came after it
+let undoToastId = null;
+
+/** A success toast with an Undo button that restores the snapshot. */
+function notifyWithUndo(message, rowIndex, snap) {
+    if (undoToastId !== null) toast.dismiss(undoToastId);
+    undoToastId = toast.show(message, 'success', 8000, {
+        label: 'Undo',
+        onClick: async () => {
+            if (await storeRow(rowIndex, snap.match, snap.sel, snap.deleted)) {
+                toast.info(`Row ${rowIndex + 1} is back as it was`);
+            }
+        }
+    });
+}
+
+/** The ERP article on the line, or null when it has none (or its match was removed). */
+function currentItem(state) {
+    return state.status === 'deleted' ? null : state.displayItem;
+}
+
+/** Remove the ERP match of a line. The candidates stay, so another one can still be picked. */
+async function deleteMatch(rowIndex) {
+    const state = getRowState(rowIndex);
+    const item = currentItem(state);
+    if (!item && !state.fabernr) {
+        toast.info(`Row ${rowIndex + 1} has no match to remove`);
+        return;
+    }
+    const snap = snapshotRow(rowIndex);
+    const nr = state.fabernr || (item && item.FaberNr) || '';
+    const match = state.match
+        ? Object.assign(cloneJson(state.match), { auto_selected: null, display_suggestion: null, confidence: 'none' })
+        : null;
+    const sel = Object.assign({}, state.sel);
+    delete sel.fabernr;
+    if (await storeRow(rowIndex, match, sel, true)) {
+        notifyWithUndo(`Match removed for row ${rowIndex + 1}${nr ? ` (${nr})` : ''}`, rowIndex, snap);
+    }
+}
+
+/** Assign an ERP article to a line; it is added to the line's candidates when it came from a search. */
+async function useItem(rowIndex, item, how) {
+    if (!item || isBlank(item.FaberNr)) return;
+    const state = getRowState(rowIndex);
+    const snap = snapshotRow(rowIndex);
+    const match = cloneJson(state.match) ||
+        { row_index: rowIndex, search_method: 'manual', suggestions: [], auto_selected: null, confidence: 'none' };
+    const list = Array.isArray(match.suggestions) ? match.suggestions : [];
+    if (!list.some(s => s.FaberNr === item.FaberNr)) list.unshift(cloneJson(item));
+    match.suggestions = list;
+    const sel = Object.assign({}, state.sel, { fabernr: item.FaberNr });
+    if (await storeRow(rowIndex, match, sel, false)) {
+        notifyWithUndo(`Row ${rowIndex + 1} now uses ${item.FaberNr}${how ? ` · ${how}` : ''}`, rowIndex, snap);
+    }
+}
+
+// ========================================================================
+// Row selection and the row panel: click a line, a panel opens directly under it
+// ========================================================================
+
+// The open panel: { row, view: 'cands' | 'results', sort, results, shown, q, qmode, busy, failed, smode, input }
+let panel = null;
+
+const PANEL_ICON_PATHS = {
+    check: '<path d="M3 8.5l3 3 7-7"/>',
+    trash: '<path d="M2.5 4h11"/><path d="M6 4V2.5h4V4"/><path d="M3.75 4l.75 9.5h7l.75-9.5"/>',
+    close: '<path d="M4 4l8 8"/><path d="M12 4l-8 8"/>',
+    back: '<path d="M13 8H3"/><path d="M7 4L3 8l4 4"/>',
+    search: '<circle cx="7" cy="7" r="4.75"/><path d="M10.5 10.5L14 14"/>',
+};
+
+function panelIcon(name) {
+    return '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" ' +
+        `stroke-linejoin="round" aria-hidden="true">${PANEL_ICON_PATHS[name]}</svg>`;
+}
+
+const SEARCH_MODES = [['mpn', 'MPN'], ['ipn', 'IPN'], ['description', 'Description']];
+const SEARCH_MODE_LABELS = { mpn: 'MPN', ipn: 'IPN', description: 'Description' };
+const PANEL_SORTS = [['rank', 'Ranking'], ['score', 'Score'], ['cost', 'Kostprijs'], ['stock', 'Voorraad']];
+const PARAM_NAMES = ['Value', 'Tolerance', 'Voltage', 'Power', 'Package'];
+
+function rowEl(rowIndex) {
+    return document.querySelector(`#matchTableBody tr[data-row="${rowIndex}"]`);
+}
+
+function panelRowEl() {
+    return document.querySelector('#matchTableBody tr.xrow');
 }
 
 function selectRow(rowIndex) {
-    const prev = selectedRow;
     selectedRow = rowIndex;
-
-    // Remove selection from previous row
-    if (prev !== null) {
-        document.querySelectorAll(`tr[data-row="${prev}"]`).forEach(tr => tr.classList.remove('row-selected'));
-    }
-    // Add selection to new row
-    document.querySelectorAll(`tr[data-row="${rowIndex}"]`).forEach(tr => tr.classList.add('row-selected'));
-
+    document.querySelectorAll('#matchTableBody tr[aria-selected="true"]').forEach(tr => tr.removeAttribute('aria-selected'));
+    const tr = rowEl(rowIndex);
+    if (tr) tr.setAttribute('aria-selected', 'true');
     saveUiState();
 }
 
-function openSelectedRowModal() {
-    if (selectedRow !== null) {
-        showRowDetailModal(selectedRow);
-    }
+/** Keep a line (and its open panel) in view inside the sheet, below the sticky header. */
+function revealRow(rowIndex) {
+    const sheet = document.getElementById('matchSheet');
+    const tr = rowEl(rowIndex);
+    if (!sheet || !tr) return;
+    const below = (panel && panel.row === rowIndex && panelRowEl()) || tr;
+    const box = sheet.getBoundingClientRect();
+    const headH = document.getElementById('matchTableHead').getBoundingClientRect().height;
+    const top = tr.getBoundingClientRect().top;
+    const bottom = below.getBoundingClientRect().bottom;
+    const minTop = box.top + sheet.clientTop + headH;
+    const maxBottom = box.top + sheet.clientTop + sheet.clientHeight;
+    if (top < minTop) sheet.scrollTop -= (minTop - top);
+    else if (bottom > maxBottom) sheet.scrollTop += Math.min(bottom - maxBottom + 6, top - minTop);
 }
 
 function scrollSelectedRowIntoView() {
-    if (selectedRow === null) return;
-    const leftRow = document.querySelector(`#leftTableBody tr[data-row="${selectedRow}"]`);
-    if (leftRow) {
-        leftRow.scrollIntoView({ block: 'nearest' });
-    }
+    if (selectedRow !== null) revealRow(selectedRow);
 }
 
-function showRowDetailModal(rowIndex) {
-    if (!bomData) return;
-    modalSortColumn = null;
-    modalSortAsc = true;
+function togglePanel(rowIndex) {
+    if (panel && panel.row === rowIndex) closePanel();
+    else openPanel(rowIndex);
+}
 
-    const mapping = bomData.column_mapping || {};
-    const rows = bomData.rows || [];
-    const row = rows[rowIndex];
-    if (!row) return;
-
-    const strIdx = String(rowIndex);
-    const match = matchResults[strIdx];
-    const suggestions = (match && match.suggestions) ? match.suggestions : [];
-    const hasMpnfree = previousBomMode() || Object.keys(mpnfreeResults).length > 0;
-
-    // Build left side: customer BOM details
-    const mappedCols = [];
-    for (const stdCol of leftColumns) {
-        const actualCol = mapping[stdCol];
-        if (actualCol) {
-            mappedCols.push({ std: stdCol, actual: actualCol });
-        }
-    }
-
-    let leftHtml = '';
-    for (const col of mappedCols) {
-        const val = getMappedValue(row, col.actual);
-        const isClickable = col.std === 'Description' || col.std === 'MPN';
-        const extraClass = isClickable ? ' left-field-clickable' : '';
-        const clickAttr = isClickable
-            ? ` data-field-type="${col.std === 'MPN' ? 'mpn' : 'description'}" style="cursor:pointer; text-decoration:underline dotted; text-underline-offset:3px;" title="Click to copy to search box${col.std === 'MPN' ? ' | Ctrl+click: Google | Alt+click: DigiKey' : ''}"`
-            : '';
-        leftHtml += `<div class="row-detail-field">
-            <div class="row-detail-field-label">${escapeHtml(col.std)}</div>
-            <div class="row-detail-field-value${extraClass}"${clickAttr}>${escapeHtml(val)}</div>
-        </div>`;
-    }
-
-    // MPNfree dropdown in modal
-    if (hasMpnfree) {
-        const mpnfreeVal = getMpnfreeValue(rowIndex);
-        leftHtml += `<div class="row-detail-field">
-            <div class="row-detail-field-label">MPNfree</div>
-            <div class="row-detail-field-value">
-                <select class="mpnfree-dropdown ${mpnfreeVal ? 'mpnfree-yes' : 'mpnfree-no'}"
-                        onchange="overrideMpnfreeFromModal(${rowIndex}, this.value === 'yes')">
-                    <option value="no" ${!mpnfreeVal ? 'selected' : ''}>No</option>
-                    <option value="yes" ${mpnfreeVal ? 'selected' : ''}>Yes</option>
-                </select>
-            </div>
-        </div>`;
-    }
-
-    // Match info
-    if (match) {
-        const sel = selections[strIdx] || {};
-        const fabernr = sel.fabernr || (match.auto_selected ? match.auto_selected.FaberNr : '');
-        if (fabernr) {
-            leftHtml += `<div class="row-detail-field">
-                <div class="row-detail-field-label">Assigned IPN</div>
-                <div class="row-detail-field-value" style="font-family: var(--font-family-mono); color: var(--color-primary); font-weight: 600;">${escapeHtml(fabernr)}</div>
-            </div>`;
-        }
-        leftHtml += `<div class="row-detail-field">
-            <div class="row-detail-field-label">Search Method</div>
-            <div class="row-detail-field-value">${escapeHtml(match.search_method || 'none')} (${escapeHtml(match.confidence || 'none')})</div>
-        </div>`;
-    }
-
-    // Build right side: alternatives table
-    const altTableHtml = buildAlternativesTable(suggestions, rowIndex);
-
-    // Build modal content
-    const bodyHtml = `
-        <div class="row-detail-left">${leftHtml}</div>
-        <div class="row-detail-right">
-            <div class="row-detail-header">ERP Matches (${suggestions.length} results)</div>
-            <div class="row-detail-alternatives" id="modalAltBody">
-                ${altTableHtml}
-            </div>
-            <div class="row-detail-search">
-                <select class="form-select" id="modalSearchType">
-                    <option value="mpn">MPN</option>
-                    <option value="ipn">IPN</option>
-                    <option value="description" selected>Description</option>
-                </select>
-                <input type="text" class="form-input" id="modalSearchQuery" placeholder="Search query..."
-                       onkeydown="if(event.key==='Enter') manualSearch(${rowIndex})">
-                <button class="btn btn-primary btn-sm" onclick="manualSearch(${rowIndex})">Search</button>
-            </div>
-        </div>
-    `;
-
-    // Create modal using ModalManager pattern but with fullscreen size
-    const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
-
-    const modalEl = document.createElement('div');
-    modalEl.className = 'modal modal-fullscreen';
-
-    modalEl.innerHTML = `
-        <div class="modal-header" style="display: flex; align-items: center; gap: 12px;">
-            <button class="btn btn-outline btn-sm" onclick="closeRowDetailModal()">Close</button>
-            <h3 class="modal-title">Row ${rowIndex + 1} Details</h3>
-        </div>
-        <div class="modal-body">${bodyHtml}</div>
-    `;
-
-    // MPN click handler: Click=Copy, Ctrl+Click=Google, Alt+Click=DigiKey
-    modalEl.addEventListener('click', function(e) {
-        if (e.target.classList.contains('mpn-clickable')) {
-            const mpn = e.target.innerText.trim();
-            if (!mpn) return;
-
-            if (e.ctrlKey || e.metaKey) {
-                e.preventDefault();
-                window.open(`https://www.google.com/search?q=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
-            } else if (e.altKey) {
-                e.preventDefault();
-                window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
-            } else {
-                navigator.clipboard.writeText(mpn).catch(() => {});
-            }
-        }
-        // Left panel field click handler
-        if (e.target.classList.contains('left-field-clickable')) {
-            const val = e.target.textContent.trim();
-            if (!val) return;
-            const fieldType = e.target.dataset.fieldType;
-
-            if (fieldType === 'mpn' && (e.ctrlKey || e.metaKey)) {
-                e.preventDefault();
-                window.open(`https://www.google.com/search?q=${encodeURIComponent(val)}`, '_blank', 'noopener,noreferrer');
-            } else if (fieldType === 'mpn' && e.altKey) {
-                e.preventDefault();
-                window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(val)}`, '_blank', 'noopener,noreferrer');
-            } else {
-                document.getElementById('modalSearchQuery').value = val;
-                document.getElementById('modalSearchType').value = fieldType;
-            }
-        }
-    });
-
-    overlay.appendChild(modalEl);
-
-    // Close on backdrop click
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) closeRowDetailModal();
-    });
-
-    document.body.appendChild(overlay);
-    document.body.style.overflow = 'hidden';
-
-    // Show with animation
-    requestAnimationFrame(() => overlay.classList.add('show'));
-
-    activeModal = overlay;
-
-    // Escape key handler
-    const escHandler = (e) => {
-        if (e.key === 'Escape') {
-            closeRowDetailModal();
-            document.removeEventListener('keydown', escHandler);
-        }
+function openPanel(rowIndex) {
+    const tr = rowEl(rowIndex);
+    if (!tr || tr.hidden) return;
+    selectRow(rowIndex);
+    panel = {
+        row: rowIndex, view: 'cands', sort: 'rank', results: [], shown: [],
+        q: '', qmode: '', busy: false, failed: false, smode: null, input: null,
     };
-    document.addEventListener('keydown', escHandler);
-
-    // Focus search input
-    setTimeout(() => {
-        const input = document.getElementById('modalSearchQuery');
-        if (input) input.focus();
-    }, 200);
+    mountPanel();
+    fitMatchTable();
+    revealRow(rowIndex);
 }
 
-const modalColumns = [
-    { key: 'FaberNr', label: 'FaberNr' },
-    { key: 'Omschrijving', label: 'Omschrijving' },
-    { key: 'Manufacturer', label: 'Manufacturer' },
-    { key: 'MPN', label: 'MPN' },
-    { key: 'KlantNaam', label: 'KlantNaam' },
-    { key: 'Mounting', label: 'Mounting' },
-    { key: 'Status', label: 'Status' },
-    { key: 'Kostprijs', label: 'Kostprijs', numeric: true },
-    { key: 'Voorraad', label: 'Voorraad', numeric: true },
-    { key: 'Verbruik', label: 'Verbruik', numeric: true },
-    { key: 'InBestelling', label: 'InBestelling', numeric: true },
-    { key: 'KlantNr', label: 'KlantNr' },
-    { key: 'Type', label: 'Type' },
-];
+function closePanel(silent) {
+    if (!panel) return;
+    unmountPanel();
+    panel = null;
+    if (!silent) fitMatchTable();
+}
 
-function sortModalTable(columnKey) {
-    if (modalSortColumn === columnKey) {
-        modalSortAsc = !modalSortAsc;
+function unmountPanel() {
+    document.querySelectorAll('#matchTableBody tr.xrow').forEach(x => x.remove());
+    document.querySelectorAll('#matchTableBody tr.is-open').forEach(tr => {
+        tr.classList.remove('is-open');
+        tr.removeAttribute('aria-expanded');
+    });
+}
+
+/** Insert the panel row under its line (also after every renderTables) and fill it. */
+function mountPanel() {
+    unmountPanel();
+    if (!panel) return;
+    const tr = rowEl(panel.row);
+    if (!tr || tr.hidden) { panel = null; return; }
+    const x = document.createElement('tr');
+    x.className = 'xrow';
+    x.innerHTML = `<td colspan="${tr.children.length}"><div class="xwrap">` +
+        `<div class="xpanel" role="region" aria-label="Row ${panel.row + 1}: current match, candidates and search">` +
+        '<section class="xcur" aria-label="Current match"></section>' +
+        '<section class="xright"><div class="xhead"></div>' +
+        '<div class="xmini"><div class="xmini-scroll"></div></div>' +
+        '<div class="xsearch"></div></section>' +
+        '</div></div></td>';
+    tr.after(x);
+    tr.classList.add('is-open');
+    tr.setAttribute('aria-expanded', 'true');
+    renderPanel();
+}
+
+function renderPanel() {
+    const x = panelRowEl();
+    if (!x || !panel) return;
+    x.querySelector('.xcur').innerHTML = panelCurrentHtml(panel.row);
+    x.querySelector('.xhead').innerHTML = panelHeadHtml(panel.row);
+    x.querySelector('.xmini-scroll').innerHTML = panelListHtml(panel.row);
+    x.querySelector('.xsearch').innerHTML = panelSearchHtml(panel.row);
+}
+
+/** Up to two notes from the parameter indicators of the line: what differs, or that all checks match. */
+function paramNotes(rowIndex) {
+    const tr = rowEl(rowIndex);
+    if (!tr) return '';
+    const out = [];
+    let checked = false;
+    tr.querySelectorAll('td.pc').forEach((td, k) => {
+        const ind = td.querySelector('.param-indicator');
+        if (!ind) return;
+        if (!ind.classList.contains('param-na') && !ind.classList.contains('param-missing')) checked = true;
+        const tip = escapeHtml(String(ind.dataset.tip || ind.title || '').replace(' | ', ', '));
+        const name = PARAM_NAMES[k] || 'Parameter';
+        if (ind.classList.contains('param-diff')) {
+            out.push(`<div class="xnote is-bad" title="${tip}">✖ ${name} differs · ${tip}</div>`);
+        } else if (ind.classList.contains('param-acceptable')) {
+            out.push(`<div class="xnote is-warn" title="${tip}">⚠ ${name} · ${tip}</div>`);
+        }
+    });
+    if (!out.length) {
+        out.push(checked
+            ? '<div class="xnote is-ok">✓ Checked parameters match</div>'
+            : '<div class="xnote">No parameters checked for this line</div>');
+    }
+    return out.slice(0, 2).join('');
+}
+
+function panelCurrentHtml(rowIndex) {
+    const state = getRowState(rowIndex);
+    const item = currentItem(state);
+    const n = rowIndex + 1;
+    let h = `<div class="xcur-top"><span class="xlabel">Current match</span>${statusBadge(state)}</div>`;
+
+    if (item) {
+        const isSugg = !state.fabernr;
+        const nr = state.fabernr || item.FaberNr || '';
+        const nrHtml = isSugg
+            ? `<span class="sugg">${escapeHtml(nr)}</span><span class="fx-badge fx-badge-steel">Suggestion</span>`
+            : `<span class="fnr">${escapeHtml(nr)}</span>${renderPreviousBomCheck(nr)}`;
+        const meta = [item.Manufacturer, item.MPN].filter(v => !isBlank(v));
+        h += `<div class="xcur-nr">${nrHtml}${isBlank(item.Mounting) ? '' : mountingBadge(item.Mounting)}</div>` +
+            `<div class="xcur-oms" title="${escapeHtml(item.Omschrijving || '')}">${escapeHtml(item.Omschrijving || '—')}</div>` +
+            (meta.length ? `<div class="xcur-meta">${escapeHtml(item.Manufacturer || '—')} · <span class="fx-mono">${escapeHtml(item.MPN || '—')}</span></div>` : '') +
+            `<div class="xfacts"><span>Kostprijs<b>${priceHtml(item.Kostprijs)}</b></span><span>Voorraad<b>${stockHtml(item.Voorraad)}</b></span></div>` +
+            paramNotes(rowIndex);
+    } else if (state.fabernr) {
+        h += `<div class="xcur-nr"><span class="fnr">${escapeHtml(state.fabernr)}</span>${renderPreviousBomCheck(state.fabernr)}</div>` +
+            '<div class="xnone-text">Assigned by hand; the article details are not loaded.</div>';
     } else {
-        modalSortColumn = columnKey;
-        modalSortAsc = true;
+        let title = 'Not matched yet';
+        let text = 'Run Find IPN, or search the ERP by MPN, IPN or description below.';
+        if (state.status === 'deleted') {
+            title = 'Match removed';
+            text = `Row ${n} has no ERP article now. Use a candidate or search the ERP by MPN, IPN or description.`;
+        } else if (state.match) {
+            title = 'No match';
+            text = `Row ${n} has no ERP article. Use a candidate or search the ERP by MPN, IPN or description.`;
+        }
+        h += `<div class="xnone"><span class="xnone-title">${title}</span><span class="xnone-text">${text}</span></div>`;
     }
-    const altBody = document.getElementById('modalAltBody');
-    if (altBody) {
-        altBody.innerHTML = buildAlternativesTable(modalSuggestions, modalRowIndex);
-    }
+
+    const canRemove = !!(item || state.fabernr);
+    // A suggestion, or a partial match Find IPN assigned itself, can be confirmed (it becomes Matched)
+    let acceptLabel = '';
+    if (item && !state.fabernr) acceptLabel = 'Accept suggestion';
+    else if (item && !state.sel.fabernr && state.status === 'partial') acceptLabel = 'Accept match';
+    h += '<div class="xcur-act">' +
+        (acceptLabel ? `<button type="button" class="btn btn-primary" data-act="accept">${panelIcon('check')}${acceptLabel}</button>` : '') +
+        `<button type="button" class="btn btn-danger" data-act="remove"${canRemove ? '' : ' disabled title="This line has no match"'}>${panelIcon('trash')}Remove match</button>` +
+        '</div>';
+    return h;
 }
 
-function buildAlternativesTable(suggestions, rowIndex) {
-    if (!suggestions || suggestions.length === 0) {
-        return '<div style="padding: 24px; text-align: center; color: var(--text-muted);">No matches found. Use manual search below.</div>';
-    }
-
-    // Store for sorting
-    modalSuggestions = suggestions;
-    modalRowIndex = rowIndex;
-
-    // Sort if a column is selected
-    let sorted = [...suggestions];
-    if (modalSortColumn) {
-        const colDef = modalColumns.find(c => c.key === modalSortColumn);
-        const isNumeric = colDef && colDef.numeric;
-        sorted.sort((a, b) => {
-            let va = a[modalSortColumn] || '';
-            let vb = b[modalSortColumn] || '';
-            if (isNumeric) {
-                va = parseFloat(va) || 0;
-                vb = parseFloat(vb) || 0;
-                return modalSortAsc ? va - vb : vb - va;
-            }
-            va = String(va).toLowerCase();
-            vb = String(vb).toLowerCase();
-            if (va < vb) return modalSortAsc ? -1 : 1;
-            if (va > vb) return modalSortAsc ? 1 : -1;
-            return 0;
-        });
-    }
-
-    let html = '<table class="data-table"><thead><tr>';
-    for (const col of modalColumns) {
-        const arrow = modalSortColumn === col.key ? (modalSortAsc ? ' \u25B2' : ' \u25BC') : '';
-        html += `<th style="cursor:pointer; user-select:none;" onclick="sortModalTable('${col.key}')">${col.label}${arrow}</th>`;
-    }
-    html += '<th></th></tr></thead><tbody>';
-
-    for (const s of sorted) {
-        const descHtml = s._param_highlights && s._param_highlights.length > 0
-            ? applyHighlights(s.Omschrijving || '', s._param_highlights)
-            : escapeHtml(s.Omschrijving || '');
-        const fabernr = escapeHtml(s.FaberNr || '');
-
-        html += `<tr>
-            <td><strong>${fabernr}</strong>${renderPreviousBomCheck(s.FaberNr || '')}</td>
-            <td title="${escapeHtml(s.Omschrijving || '')}">${descHtml}</td>
-            <td>${escapeHtml(s.Manufacturer || '')}</td>
-            <td><span class="mpn-clickable" title="Click: Copy | Ctrl+Click: Google | Alt+Click: DigiKey">${escapeHtml(s.MPN || '')}</span></td>
-            <td>${escapeHtml(s.KlantNaam || '')}</td>
-            <td>${escapeHtml(s.Mounting || '')}</td>
-            <td>${escapeHtml(s.Status || '')}</td>
-            <td>${s.Kostprijs || 0}</td>
-            <td>${s.Voorraad || 0}</td>
-            <td>${s.Verbruik || 0}</td>
-            <td>${s.InBestelling || 0}</td>
-            <td>${escapeHtml(s.KlantNr || '')}</td>
-            <td>${escapeHtml(s.Type || '')}</td>
-            <td><button class="btn btn-primary btn-sm" onclick="selectFromModal(${rowIndex}, '${fabernr}')">Select</button></td>
-        </tr>`;
-    }
-
-    html += '</tbody></table>';
-    return html;
+/** The line's candidates in Find IPN order, with the shown article first when it is not among them. */
+function panelCandidates(rowIndex) {
+    const state = getRowState(rowIndex);
+    const list = (state.match && Array.isArray(state.match.suggestions)) ? state.match.suggestions.slice() : [];
+    const item = currentItem(state);
+    if (item && !isBlank(item.FaberNr) && !list.some(s => s.FaberNr === item.FaberNr)) list.unshift(item);
+    return list;
 }
 
-function closeRowDetailModal() {
-    if (activeModal) {
-        activeModal.classList.remove('show');
-        setTimeout(() => {
-            if (activeModal && activeModal.parentNode) {
-                activeModal.parentNode.removeChild(activeModal);
-            }
-            activeModal = null;
-            document.body.style.overflow = '';
-        }, 200);
+function sortCandidates(list, key) {
+    if (key === 'rank') return list.slice();
+    const value = (s) => {
+        if (key === 'score') { const v = toNumber(s._similarity_score); return v === null ? -Infinity : -v; }
+        if (key === 'cost') { const v = toNumber(s.Kostprijs); return v ? v : Infinity; }
+        const v = toNumber(s.Voorraad); return v === null ? Infinity : -v;  // stock: most first
+    };
+    return list.map((s, k) => ({ s, k, v: value(s) }))
+        .sort((a, b) => (a.v === b.v ? a.k - b.k : (a.v < b.v ? -1 : 1)))
+        .map(x => x.s);
+}
+
+function panelHeadHtml(rowIndex) {
+    let h;
+    if (panel.view === 'results') {
+        h = `<span class="xtitle">${panel.busy ? 'Searching...' : 'Search results'}</span>` +
+            (panel.busy ? '' : `<span class="fx-badge fx-badge-neutral fx-badge-mono">${panel.results.length}</span>`) +
+            `<span class="xrule">${escapeHtml(SEARCH_MODE_LABELS[panel.qmode] || '')} · “${escapeHtml(panel.q)}”</span><span class="xgrow"></span>` +
+            `<button type="button" class="btn btn-ghost xsmall" data-act="back">${panelIcon('back')}Back to candidates</button>`;
+    } else {
+        const count = panelCandidates(rowIndex).length;
+        h = `<span class="xtitle">Candidates for row ${rowIndex + 1}</span><span class="fx-badge fx-badge-neutral fx-badge-mono">${count}</span>` +
+            (count > 1 ? '<span class="xrule">Ranking as found by Find IPN</span>' : '') + '<span class="xgrow"></span>';
+        if (count > 1) {
+            h += '<div class="xseg" role="group" aria-label="Sort candidates">' + PANEL_SORTS.map(([key, label]) =>
+                `<button type="button" data-act="sort" data-sort="${key}" aria-pressed="${panel.sort === key}">${label}</button>`
+            ).join('') + '</div>';
+        }
     }
+    h += `<button type="button" class="btn btn-ghost xsmall xclose" data-act="close" title="Close (Esc)">${panelIcon('close')}Close</button>`;
+    return h;
 }
 
-function selectFromModal(rowIndex, fabernr) {
-    overrideFabernr(rowIndex, fabernr);
-    closeRowDetailModal();
+function scoreHtml(s) {
+    const v = toNumber(s._similarity_score);
+    if (v === null) return NIL;
+    const pct = Math.max(0, Math.min(100, Math.round(v)));
+    return `<span class="xscore"><span class="xscore-bar"><i style="width:${pct}%"></i></span><span class="xscore-pct">${pct}%</span></span>`;
 }
 
-async function overrideMpnfreeFromModal(rowIndex, value) {
-    await overrideMpnfree(rowIndex, value);
+const PANEL_LIST_HEAD = '<thead><tr><th>FaberNr</th><th>Omschrijving</th><th>Manufacturer</th><th>MPN</th><th>Mounting</th>' +
+    '<th>Status</th><th class="fx-num">Kostprijs</th><th class="fx-num">Voorraad</th><th>Score</th>' +
+    '<th class="xact"><span class="xsr">Action</span></th></tr></thead>';
+const PANEL_LIST_COLS = 10;
+
+function panelListHtml(rowIndex) {
+    const message = (text) => `<table>${PANEL_LIST_HEAD}<tbody><tr class="xmsg"><td colspan="${PANEL_LIST_COLS}">${text}</td></tr></tbody></table>`;
+    if (panel.view === 'results' && panel.busy) {
+        return message(`Searching the ERP by ${escapeHtml(SEARCH_MODE_LABELS[panel.qmode] || '')} for “${escapeHtml(panel.q)}”...`);
+    }
+    const state = getRowState(rowIndex);
+    const list = panel.view === 'results' ? panel.results : sortCandidates(panelCandidates(rowIndex), panel.sort);
+    panel.shown = list;
+    if (!list.length) {
+        if (panel.view === 'results') {
+            return message(panel.failed ? 'The search failed. Try again.' : 'No ERP articles found. Try another MPN, IPN or description.');
+        }
+        return message('No candidates for this line. Search the ERP below by MPN, IPN or description.');
+    }
+
+    const item = currentItem(state);
+    const curNr = state.fabernr || (item && item.FaberNr) || '';
+    const curIsSugg = !state.fabernr;
+    const customerMpn = customerSearchValue(rowIndex, 'mpn');
+    let body = '';
+    list.forEach((s, k) => {
+        const isCur = !!curNr && s.FaberNr === curNr;
+        const act = !isCur
+            ? `<button type="button" class="btn xuse" data-act="use" data-k="${k}">Use</button>`
+            : (curIsSugg ? '<span class="fx-badge fx-badge-steel">Suggestion</span>' : '<span class="fx-badge fx-badge-success">✓ In use</span>');
+        const oms = s.Omschrijving || '';
+        const omsHtml = s._param_highlights && s._param_highlights.length ? applyHighlights(oms, s._param_highlights) : escapeHtml(oms);
+        const cls = isCur ? ` class="is-cur${curIsSugg ? ' is-sugg' : ''}"` : '';
+        const stockN = toNumber(s.Voorraad);
+        body += `<tr${cls}>` +
+            `<td><span class="fnr">${escapeHtml(s.FaberNr || '')}</span>${renderPreviousBomCheck(s.FaberNr || '')}</td>` +
+            `<td>${oms ? `<span class="xclip" title="${escapeHtml(oms)}">${omsHtml}</span>` : NIL}</td>` +
+            `<td>${isBlank(s.Manufacturer) ? NIL : `<span class="xclip xclip-m" title="${escapeHtml(s.Manufacturer)}">${escapeHtml(s.Manufacturer)}</span>`}</td>` +
+            `<td class="fx-mono">${isBlank(s.MPN) ? NIL : mpnHtml(s.MPN, customerMpn, 'xclip xclip-l')}</td>` +
+            `<td>${mountingBadge(s.Mounting)}</td>` +
+            `<td>${erpStatusBadge(s.Status)}</td>` +
+            `<td class="fx-num fx-mono">${priceHtml(s.Kostprijs)}</td>` +
+            `<td class="fx-num${stockN !== null && stockN > 0 ? ' fx-mono' : ''}">${stockHtml(s.Voorraad)}</td>` +
+            `<td>${scoreHtml(s)}</td>` +
+            `<td class="xact">${act}</td></tr>`;
+    });
+    return `<table>${PANEL_LIST_HEAD}<tbody>${body}</tbody></table>`;
 }
 
-// ========================================================================
-// Manual Search
-// ========================================================================
+/** The customer's value to search on: MPN, Description, or the line's current FaberNr for IPN. */
+function customerSearchValue(rowIndex, mode) {
+    const row = (bomData && bomData.rows && bomData.rows[rowIndex]) || {};
+    const mapping = (bomData && bomData.column_mapping) || {};
+    if (mode === 'mpn') return getMappedValue(row, mapping.MPN).trim();
+    if (mode === 'ipn') {
+        const state = getRowState(rowIndex);
+        const item = currentItem(state);
+        return state.fabernr || (item && item.FaberNr) || '';
+    }
+    return getMappedValue(row, mapping.Description).trim();
+}
 
-async function manualSearch(rowIndex) {
-    const searchType = document.getElementById('modalSearchType').value;
-    const query = document.getElementById('modalSearchQuery').value.trim();
+function panelSearchHtml(rowIndex) {
+    if (!panel.smode) panel.smode = customerSearchValue(rowIndex, 'mpn') ? 'mpn' : 'description';
+    if (panel.input === null) panel.input = customerSearchValue(rowIndex, panel.smode);
+    const seg = SEARCH_MODES.map(([key, label]) =>
+        `<button type="button" data-act="smode" data-mode="${key}" aria-pressed="${panel.smode === key}">${label}</button>`
+    ).join('');
+    return '<span class="xlabel">Search ERP</span>' +
+        `<div class="xseg" role="group" aria-label="Search by">${seg}</div>` +
+        `<label class="xfield">${panelIcon('search')}` +
+        `<input type="text" class="xq" value="${escapeHtml(panel.input)}" aria-label="Search the ERP" autocomplete="off" spellcheck="false"></label>` +
+        `<button type="button" class="btn xgo" data-act="search"${panel.busy ? ' disabled' : ''}>${panelIcon('search')}${panel.busy ? 'Searching...' : 'Search'}</button>`;
+}
+
+/** Manual ERP search from the panel. A preview only: the line changes once a result is used. */
+async function runPanelSearch() {
+    if (!panel || panel.busy) return;
+    const p = panel;
+    const query = String(p.input || '').trim();
     if (!query) {
-        toast.warning('Please enter a search query');
+        toast.warning('Type an MPN, IPN or description first');
+        const input = panelRowEl() && panelRowEl().querySelector('.xq');
+        if (input) input.focus();
         return;
     }
-
-    const altBody = document.getElementById('modalAltBody');
-    altBody.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-muted);">Searching...</div>';
-
+    Object.assign(p, { view: 'results', q: query, qmode: p.smode, results: [], busy: true, failed: false });
+    renderPanel();
     try {
         const data = await apiCall('/api/match/manual-search', {
             method: 'POST',
-            body: JSON.stringify({ row_index: rowIndex, search_type: searchType, query: query })
+            body: JSON.stringify({ row_index: p.row, search_type: p.smode, query: query, preview: true })
         });
-
-        const suggestions = data.suggestions || [];
-
-        // Update stored match results
-        if (data.result) {
-            matchResults[String(rowIndex)] = data.result;
-        }
-
-        altBody.innerHTML = buildAlternativesTable(suggestions, rowIndex);
-
-        if (suggestions.length === 0) {
-            toast.info('No results found');
-        } else {
-            toast.success(`Found ${suggestions.length} results`);
-        }
+        p.results = data.suggestions || [];
     } catch (e) {
-        altBody.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--color-danger);">Search failed</div>';
+        p.results = [];
+        p.failed = true;
+    }
+    p.busy = false;
+    if (panel === p) renderPanel();  // the panel may have closed or moved meanwhile
+}
+
+function copyText(text) {
+    const t = String(text || '').trim();
+    if (!t) return;
+    navigator.clipboard.writeText(t)
+        .then(() => toast.success(`Copied: ${t.substring(0, 50)}`))
+        .catch(() => {});
+}
+
+/** Clicks inside the open panel (buttons carry data-act). */
+function onPanelClick(e) {
+    if (!panel) return;
+    const btn = e.target.closest('[data-act]');
+    if (!btn) {
+        const mpn = e.target.closest('.mpn-clickable');
+        if (mpn) copyText(mpn.textContent);
+        return;
+    }
+    if (btn.disabled) return;
+    const rowIndex = panel.row;
+    switch (btn.dataset.act) {
+        case 'close':
+            closePanel();
+            break;
+        case 'remove':
+            deleteMatch(rowIndex);
+            break;
+        case 'accept':
+            useItem(rowIndex, currentItem(getRowState(rowIndex)), getRowState(rowIndex).fabernr ? 'match accepted' : 'suggestion accepted');
+            break;
+        case 'use': {
+            const item = (panel.shown || [])[parseInt(btn.dataset.k, 10)];
+            const how = panel.view === 'results'
+                ? `from the ${SEARCH_MODE_LABELS[panel.qmode] || ''} search`
+                : 'from the candidates';
+            // Back to the candidates: the chosen article is now among them, marked as in use
+            panel.view = 'cands';
+            useItem(rowIndex, item, how);
+            break;
+        }
+        case 'sort':
+            panel.sort = btn.dataset.sort;
+            renderPanel();
+            break;
+        case 'smode': {
+            panel.smode = btn.dataset.mode;
+            panel.input = customerSearchValue(rowIndex, panel.smode);
+            renderPanel();
+            const input = panelRowEl().querySelector('.xq');
+            input.focus();
+            input.select();
+            break;
+        }
+        case 'search':
+            runPanelSearch();
+            break;
+        case 'back':
+            panel.view = 'cands';
+            renderPanel();
+            break;
     }
 }
 
@@ -1201,48 +1460,61 @@ async function manualSearch(rowIndex) {
 // Filter/Search
 // ========================================================================
 
-function filterTable() {
-    const searchText = (document.getElementById('searchInput').value || '').toLowerCase();
-    const statusFilter = document.getElementById('statusFilter').value;
-
-    const leftRows = document.querySelectorAll('#leftTableBody tr');
-    const rightRows = document.querySelectorAll('#rightTableBody tr');
-    const paramsRows = document.querySelectorAll('#paramsTableBody tr');
-
-    for (let i = 0; i < leftRows.length; i++) {
-        const leftRow = leftRows[i];
-        const rightRow = rightRows[i];
-        const rowIdx = leftRow.dataset.row;
-
-        let show = true;
-
-        // Text search
-        if (searchText) {
-            const leftText = leftRow.textContent.toLowerCase();
-            const rightText = rightRow.textContent.toLowerCase();
-            show = leftText.includes(searchText) || rightText.includes(searchText);
-        }
-
-        // Status filter
-        if (show && statusFilter !== 'all') {
-            const match = matchResults[rowIdx];
-            const confidence = match ? match.confidence : 'none';
-            if (statusFilter === 'matched' && confidence !== 'high') show = false;
-            if (statusFilter === 'partial' && confidence !== 'medium' && confidence !== 'low') show = false;
-            if (statusFilter === 'nomatch' && confidence !== 'none') show = false;
-        }
-
-        leftRow.style.display = show ? '' : 'none';
-        rightRow.style.display = show ? '' : 'none';
-        if (paramsRows[i]) paramsRows[i].style.display = show ? '' : 'none';
-    }
+function rowMatchesStatus(status) {
+    if (statusFilter === 'all') return true;
+    if (statusFilter === 'matched') return status === 'matched';
+    if (statusFilter === 'partial') return status === 'partial';
+    // No match: also lines without a match yet and removed matches (as before: confidence 'none')
+    if (statusFilter === 'nomatch') return status !== 'matched' && status !== 'partial';
+    return true;
 }
+
+function filterTable() {
+    const input = document.getElementById('searchInput');
+    const searchText = ((input && input.value) || '').trim().toLowerCase();
+    const tbody = document.getElementById('matchTableBody');
+    if (!tbody) return;
+
+    let any = false;
+    let total = 0;
+    tbody.querySelectorAll('tr[data-row]').forEach(tr => {
+        total++;
+        let show = rowMatchesStatus(tr.dataset.status === 'none' ? '' : tr.dataset.status);
+        if (show && searchText) {
+            show = tr.textContent.toLowerCase().includes(searchText);
+        }
+        tr.hidden = !show;
+        if (show) any = true;
+    });
+    // A filtered-out line takes its open panel with it
+    if (panel) {
+        const open = rowEl(panel.row);
+        if (!open || open.hidden) closePanel(true);
+    }
+    const empty = tbody.querySelector('.empty-row');
+    if (empty) empty.hidden = any || total === 0;
+
+    fitMatchTable();
+}
+
+function setStatusFilter(filter) {
+    statusFilter = filter || 'all';
+    document.querySelectorAll('#statusChips .fx-chip').forEach(chip => {
+        chip.setAttribute('aria-pressed', chip.dataset.filter === statusFilter ? 'true' : 'false');
+    });
+    filterTable();
+}
+
+document.querySelectorAll('#statusChips .fx-chip').forEach(chip => {
+    chip.addEventListener('click', () => setStatusFilter(chip.dataset.filter));
+});
 
 // ========================================================================
 // Find IPN (Batch)
 // ========================================================================
 
 async function findIpn() {
+    const saved = captureScroll();
     showLoading();
     try {
         const data = await apiCall('/api/match/find-ipn', {
@@ -1254,8 +1526,11 @@ async function findIpn() {
             for (const r of data.results) {
                 matchResults[String(r.row_index)] = r;
             }
+            // A new match run: lines are no longer marked as removed
+            deletedRows.clear();
         }
         renderTables();
+        restoreScroll(saved);
 
         let msg = `Found matches: ${data.matched}/${data.total} rows`;
         if (data.parameterized > 0) {
@@ -1266,26 +1541,6 @@ async function findIpn() {
         // toast shown
     } finally {
         hideLoading();
-    }
-}
-
-// ========================================================================
-// Overrides
-// ========================================================================
-
-async function overrideFabernr(rowIndex, value) {
-    const strIdx = String(rowIndex);
-    if (!selections[strIdx]) selections[strIdx] = {};
-    selections[strIdx].fabernr = value;
-
-    try {
-        await apiCall('/api/match/override', {
-            method: 'POST',
-            body: JSON.stringify({ row_index: rowIndex, fabernr: value })
-        });
-        renderTables();
-    } catch (e) {
-        // toast shown
     }
 }
 
@@ -1329,80 +1584,81 @@ async function exportBom() {
 }
 
 // ========================================================================
-// Keyboard Navigation
+// Keyboard: arrows move the selection (the open panel moves along), Enter opens or closes, Esc closes
 // ========================================================================
 
-document.addEventListener('keydown', (e) => {
-    // Only handle arrow keys when no modal is open
-    if (activeModal) return;
-    if (!bomData || !bomData.rows) return;
-
+function visibleRowAfter(start, step) {
     const totalRows = bomData.rows.length;
-    if (totalRows === 0) return;
+    for (let i = start + step; i >= 0 && i < totalRows; i += step) {
+        const tr = rowEl(i);
+        if (tr && !tr.hidden) return i;
+    }
+    return null;
+}
 
-    if (e.key === 'ArrowDown') {
+document.addEventListener('keydown', (e) => {
+    // Escape: first switch Copy / Delete mode off, then close the panel
+    if (e.key === 'Escape') {
+        if (copyMode || deleteMode) setMode(null);
+        else if (panel) closePanel();
+        return;
+    }
+
+    if (!bomData || !bomData.rows || bomData.rows.length === 0) return;
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    // Leave typing in the search fields and the MPNfree dropdowns alone
+    const target = e.target && e.target.closest ? e.target : null;
+    if (target && target.closest('input, select, textarea')) return;
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
-        if (selectedRow === null) {
-            selectedRow = 0;
-        } else {
-            // Find next visible row
-            const leftRows = document.querySelectorAll('#leftTableBody tr');
-            let found = false;
-            for (let i = selectedRow + 1; i < totalRows; i++) {
-                const tr = leftRows[i];
-                if (tr && tr.style.display !== 'none') {
-                    selectedRow = i;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) return;
-        }
-        renderTables();
-        scrollSelectedRowIntoView();
-    } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        if (selectedRow === null) return;
-        const leftRows = document.querySelectorAll('#leftTableBody tr');
-        for (let i = selectedRow - 1; i >= 0; i--) {
-            const tr = leftRows[i];
-            if (tr && tr.style.display !== 'none') {
-                selectedRow = i;
-                renderTables();
-                scrollSelectedRowIntoView();
-                break;
-            }
-        }
+        const step = e.key === 'ArrowDown' ? 1 : -1;
+        const next = selectedRow === null ? (step > 0 ? visibleRowAfter(-1, 1) : null) : visibleRowAfter(selectedRow, step);
+        if (next === null) return;
+        if (panel) openPanel(next);
+        else { selectRow(next); scrollSelectedRowIntoView(); }
     } else if (e.key === 'Enter') {
+        // Enter on a button or link keeps its own meaning
+        if (target && target.closest('button, a')) return;
+        if (selectedRow === null) return;
+        const tr = rowEl(selectedRow);
+        if (!tr || tr.hidden) return;
         e.preventDefault();
-        openSelectedRowModal();
+        if (deleteMode) deleteMatch(selectedRow);
+        else if (!copyMode) togglePanel(selectedRow);
     }
 });
 
 // ========================================================================
-// Delegated Click Handler for MPN shortcuts and Copy Mode
+// Delegated handlers on the sheet: row panel, Delete mode, Copy mode, MPN shortcuts
 // ========================================================================
 
-document.getElementById('splitPanel').addEventListener('click', function(e) {
+const _matchSheet = document.getElementById('matchSheet');
+
+_matchSheet.addEventListener('click', function(e) {
+    const inPanel = e.target.closest('#matchTableBody tr.xrow');
+    const tr = inPanel ? null : e.target.closest('#matchTableBody tr[data-row]');
+
     // Copy mode: copy any cell's text to clipboard
-    if (copyMode) {
-        const td = e.target.closest('td');
+    if (copyMode && !inPanel) {
+        const td = e.target.closest('#matchTableBody td');
         if (td) {
             e.stopPropagation();
             e.preventDefault();
-            const text = td.textContent.trim();
-            if (text && text !== '\u2014') {
+            const text = (td.dataset.copy || td.textContent).trim();
+            if (text && text !== '—') {
                 navigator.clipboard.writeText(text).then(() => {
-                    td.style.outline = '2px solid var(--color-primary)';
-                    setTimeout(() => { td.style.outline = ''; }, 300);
+                    td.classList.add('cell-copied');
+                    setTimeout(() => { td.classList.remove('cell-copied'); }, 300);
                     toast.success(`Copied: ${text.substring(0, 50)}`);
                 }).catch(() => {});
             }
+            if (tr) selectRow(parseInt(tr.dataset.row, 10));
             return;
         }
     }
 
-    // MPN click shortcuts: Ctrl+Click=Google, Alt+Click=DigiKey
+    // MPN click shortcuts: Ctrl+Click=Google, Alt+Click=DigiKey (in the table and in the panel)
     const mpnEl = e.target.closest('.mpn-clickable');
     if (mpnEl && (e.ctrlKey || e.metaKey || e.altKey)) {
         const mpn = mpnEl.innerText.trim();
@@ -1414,6 +1670,40 @@ document.getElementById('splitPanel').addEventListener('click', function(e) {
         } else if (e.altKey) {
             window.open(`https://www.digikey.nl/en/products/result?keywords=${encodeURIComponent(mpn)}`, '_blank', 'noopener,noreferrer');
         }
+        return;
+    }
+
+    if (inPanel) {
+        onPanelClick(e);
+        return;
+    }
+
+    if (!tr) return;
+    if (e.target.closest('a, button, select, input')) return;
+    const rowIndex = parseInt(tr.dataset.row, 10);
+    if (deleteMode) {
+        selectRow(rowIndex);
+        deleteMatch(rowIndex);
+        return;
+    }
+    // The second click of a double click keeps the panel open
+    if (e.detail > 1) return;
+    // Dragging to select text in a line does not toggle its panel
+    const textSel = window.getSelection ? window.getSelection() : null;
+    if (textSel && !textSel.isCollapsed && tr.contains(textSel.anchorNode)) return;
+    togglePanel(rowIndex);
+});
+
+// Typing and Enter in the panel's search field
+_matchSheet.addEventListener('input', function(e) {
+    if (panel && e.target.classList && e.target.classList.contains('xq')) panel.input = e.target.value;
+});
+
+_matchSheet.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('xq')) {
+        e.preventDefault();
+        e.stopPropagation();
+        runPanelSearch();
     }
 });
 

@@ -1,0 +1,1226 @@
+/**
+ * BOM Matcher - Match page (process.html), design "mt-01a Knoppenrij in de kop".
+ * One header line (Back, file name, customer, the five actions), a slim glass filter bar
+ * and ONE white-sheet table that fills the window and scrolls on its own.
+ * Loaded only from process.html, after faber.css, main.css and matcher.css;
+ * the old split-panel / params-table rules in matcher.css are no longer used here.
+ */
+
+/* White-sheet tokens of the house style (faber.css does not carry them yet) */
+.match-page {
+    --sheet-head: #f6f7f9;
+    --sheet-edge: #e3e5ea;
+    --sheet-row: #eceef2;
+    --sheet-col: #f0f1f4;
+    --sheet-hover: #f7f8fb;
+    --shadow-sheet: 0 1px 2px rgba(20, 24, 40, 0.06), 0 4px 14px rgba(20, 24, 40, 0.06);
+    --desc-w: 220px;
+}
+
+/* ========================================
+   PAGE FRAME: the window is the page, only the sheet scrolls
+   ======================================== */
+
+@media screen and (min-height: 560px) {
+    html,
+    body.fx-page {
+        height: 100%;
+    }
+
+    body.fx-page {
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    body.fx-page > .fx-mast-wrap {
+        flex-shrink: 0;
+    }
+
+    body.fx-page > .page-container {
+        flex: 1 1 auto;
+        min-height: 0;
+        width: 100%;
+        display: flex;
+        flex-direction: column;
+        padding-bottom: var(--space-5);
+    }
+
+    .match-page {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    .match-sheet {
+        flex: 1 1 auto;
+        min-height: 240px;
+    }
+}
+
+.match-page {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+}
+
+.match-vsep {
+    width: 1px;
+    height: 24px;
+    background: var(--line-control);
+    flex-shrink: 0;
+}
+
+/* ========================================
+   1. HEADER: Back, file name, customer left; the five actions right
+   ======================================== */
+
+.match-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-5);
+    min-width: 0;
+}
+
+.match-title {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.match-title .fx-heading {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.match-back {
+    padding: 0 12px 0 10px;
+    flex-shrink: 0;
+}
+
+.klant-pill {
+    flex-shrink: 0;
+}
+
+.match-page .klant-pill {
+    height: 24px;
+    padding: 0 11px;
+    font-size: 13px;
+    line-height: 24px;
+}
+
+.klant-pill[hidden] {
+    display: none;
+}
+
+.match-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-shrink: 0;
+}
+
+.match-actions .match-vsep {
+    margin: 0 var(--space-1);
+}
+
+/* Copy / Delete: mode toggles. ON = citroen, like the active filter; the label span changes, the icon stays */
+.btn-toggle {
+    min-width: 134px;
+    justify-content: flex-start;
+}
+
+.btn-toggle .tlabel {
+    font-variant-numeric: tabular-nums;
+}
+
+.btn-toggle[aria-pressed="true"],
+.btn-toggle[aria-pressed="true"]:hover:not(:disabled) {
+    background: var(--citroen);
+    border-color: var(--citroen);
+    color: var(--on-citroen);
+    box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.btn-toggle[aria-pressed="true"]:hover:not(:disabled) {
+    border-color: rgba(27, 28, 32, 0.28);
+}
+
+.match-actions .btn:focus-visible,
+.match-back:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+/* ========================================
+   2. FILTER BAR: slim glass card, search + status chips, mode hint right
+   ======================================== */
+
+.match-filter {
+    display: flex;
+    align-items: center;
+    gap: var(--space-4);
+    padding: 7px 14px 7px 7px;
+    border-radius: var(--radius-lg);
+    min-width: 0;
+}
+
+.match-filter .match-vsep {
+    height: 22px;
+}
+
+.match-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 0 1 360px;
+    min-width: 200px;
+}
+
+.match-search .fx-icon {
+    position: absolute;
+    left: 12px;
+    width: 16px;
+    height: 16px;
+    color: var(--ink-muted);
+    pointer-events: none;
+}
+
+.match-search input {
+    width: 100%;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 0 var(--space-3) 0 36px;
+    border: 1px solid var(--line-control);
+    border-radius: 13px;
+    background: var(--surface-glass-strong);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
+}
+
+.match-search input::placeholder {
+    color: var(--ink-muted);
+    opacity: 1;
+}
+
+.match-search input:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-color: var(--focus);
+}
+
+.match-search input::-webkit-search-cancel-button {
+    cursor: pointer;
+}
+
+.match-fgroup {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    min-width: 0;
+}
+
+.match-fgroup-label {
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    white-space: nowrap;
+}
+
+.match-filter .fx-chip:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+}
+
+.mode-hint {
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.mode-hint[hidden] {
+    display: none;
+}
+
+.mode-hint .mark {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    background: var(--steel);
+    flex-shrink: 0;
+}
+
+.mode-hint.is-delete .mark {
+    background: var(--danger);
+}
+
+.mode-hint b {
+    font-weight: 600;
+}
+
+/* ========================================
+   3. THE WHITE SHEET: one table, one scrollbar
+   ======================================== */
+
+.match-sheet {
+    overflow: auto;
+    min-height: 240px;
+    background: var(--surface-raised);
+    border: 1px solid var(--sheet-edge);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sheet);
+}
+
+/* Auto fit (process.js fitMatchTable): measured at 100%, then zoom = available / needed, never below 60% */
+.match-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink);
+}
+
+.match-table th,
+.match-table td {
+    white-space: nowrap;
+    padding: 5px 8px;
+    vertical-align: middle;
+    text-align: left;
+    background: var(--surface-raised);
+    border-bottom: 1px solid var(--sheet-row);
+}
+
+.match-table th + th,
+.match-table td + td {
+    border-left: 1px solid var(--sheet-col);
+}
+
+.match-table th:first-child,
+.match-table td:first-child {
+    padding-left: 12px;
+}
+
+.match-table th:last-child,
+.match-table td:last-child {
+    padding-right: 12px;
+}
+
+/* Head: grey band, sentence case, two sticky rows (group + columns) */
+.match-table thead th {
+    position: sticky;
+    z-index: 2;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    background: var(--sheet-head);
+    color: var(--ink-muted);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    text-transform: none;
+    letter-spacing: 0;
+    border-bottom: 1px solid var(--sheet-edge);
+}
+
+.match-table thead tr.grp th {
+    top: 0;
+    height: 24px;
+    box-sizing: border-box;
+    padding-top: 4px;
+    padding-bottom: 4px;
+    font-weight: 500;
+    border-bottom: 1px solid var(--sheet-row);
+}
+
+.match-table thead tr.cols th {
+    top: 24px;
+}
+
+.match-table thead th.fx-num {
+    text-align: right;
+}
+
+/* Group boundaries: Customer BOM | ERP match | Params */
+.match-table .g-start,
+.match-table th + th.g-start,
+.match-table td + td.g-start {
+    border-left: 1px solid var(--sheet-edge);
+}
+
+/* Pinned columns: # and Status */
+.match-table .pin1 {
+    position: sticky;
+    left: 0;
+    width: 46px;
+    min-width: 46px;
+    max-width: 46px;
+    box-sizing: border-box;
+}
+
+.match-table .pin2 {
+    position: sticky;
+    left: 46px;
+    box-shadow: inset -1px 0 0 var(--sheet-edge);
+}
+
+.match-table td.pin1,
+.match-table td.pin2 {
+    z-index: 1;
+}
+
+.match-table thead th.pin1,
+.match-table thead th.pin2 {
+    z-index: 4;
+}
+
+.match-table td.fx-num,
+.match-table th.fx-num {
+    text-align: right;
+}
+
+.match-table .fx-mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.match-table th.param-col,
+.match-table td.pc {
+    padding-left: 5px;
+    padding-right: 5px;
+    text-align: center;
+}
+
+/* Rows: hover, selection (steel-soft with the steel stripe), removed matches */
+.match-table tbody tr[data-row] {
+    cursor: pointer;
+}
+
+.match-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.match-table tbody tr[data-row]:hover td {
+    background: var(--sheet-hover);
+}
+
+.match-table tbody tr[aria-selected="true"] td,
+.match-table tbody tr[aria-selected="true"]:hover td {
+    background: var(--steel-soft);
+}
+
+.match-table tbody tr[aria-selected="true"] td.pin1 {
+    box-shadow: inset 3px 0 0 var(--steel);
+}
+
+/* Removed match: a red tint, struck-through text and the Deleted badge (matcher.css tinted the <tr>) */
+.match-table tbody tr.row-deleted {
+    background-color: transparent !important;
+    filter: none;
+}
+
+.match-table tbody tr.row-deleted td {
+    background: #fcefed;
+    color: var(--ink-muted);
+}
+
+.match-table tbody tr.row-deleted td.pin1,
+.match-table tbody tr.row-deleted td.pin2 {
+    text-decoration: none;
+}
+
+.match-table tbody tr.row-deleted:hover td {
+    background: var(--danger-soft);
+}
+
+.match-table tbody tr.row-deleted[aria-selected="true"] td {
+    background: var(--steel-soft);
+}
+
+.match-table tr.empty-row td {
+    cursor: default;
+    background: var(--surface-raised) !important;
+}
+
+.match-table .table-empty {
+    padding: var(--space-6) var(--space-4) !important;
+    text-align: center;
+    color: var(--ink-muted);
+    white-space: normal;
+}
+
+/* Modes: Copy shows a copy cursor, Delete tints the hovered line */
+.mode-copy .match-table tbody tr[data-row] {
+    cursor: copy;
+}
+
+.mode-delete .match-table tbody tr[data-row]:hover td {
+    background: var(--danger-soft);
+}
+
+.match-table td.cell-copied {
+    outline: 2px solid var(--steel);
+    outline-offset: -2px;
+}
+
+/* Cell content */
+.match-table .rownum {
+    color: var(--ink-muted);
+}
+
+.match-table .nil {
+    color: var(--ink-muted);
+}
+
+.match-table .clip {
+    display: block;
+    max-width: 152px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* room for the 2-3px highlight underlines inside the clipped box */
+    padding: 1px 0 3px;
+    margin: -1px 0 -3px;
+}
+
+.match-table .clip-desc {
+    max-width: var(--desc-w);
+}
+
+.match-table .clip-m {
+    max-width: 110px;
+}
+
+.match-table .clip-s {
+    max-width: 92px;
+}
+
+.match-table .clip-t {
+    max-width: 120px;
+}
+
+/* MPN: the green underline means the same MPN as the customer BOM, amber that it only resembles
+   it (process.js mpnMatchType). The dotted "clickable" hint only shows on hover, so a plain MPN
+   has no line at all and is never mistaken for a match colour. */
+.match-table .mpn-clickable {
+    text-decoration: none;
+}
+
+.match-table .mpn-clickable:hover {
+    text-decoration: underline dotted;
+    text-underline-offset: 3px;
+}
+
+.match-table .fnr {
+    color: var(--link);
+    font-weight: 600;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.match-table .sugg {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-style: italic;
+    color: var(--ink-muted);
+}
+
+.match-table .sugg-note {
+    margin-left: 4px;
+    font-size: 11px;
+    font-style: italic;
+    color: var(--ink-muted);
+}
+
+.match-table .prevbom-check {
+    margin-left: 5px;
+    color: var(--success);
+    font-weight: 600;
+}
+
+.match-table .mpnfree-dropdown {
+    height: 20px;
+    font-size: 11px;
+}
+
+/* Description resize handle (both description columns share the width) */
+.match-table thead th.desc-th {
+    position: sticky;
+}
+
+.match-table .col-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -2px;
+    bottom: 0;
+    width: 5px;
+    cursor: col-resize;
+    z-index: 3;
+}
+
+/* ========================================
+   BADGES (house style: the word carries the meaning)
+   ======================================== */
+
+.match-page .fx-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    height: 18px;
+    padding: 0 6px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    line-height: 18px;
+    font-weight: 600;
+    white-space: nowrap;
+    box-sizing: border-box;
+    text-decoration: none;
+}
+
+.match-page .fx-badge-neutral { background: var(--surface-sunken); color: var(--ink-muted); }
+.match-page .fx-badge-steel { background: var(--steel-soft); color: var(--steel); }
+.match-page .fx-badge-gold { background: var(--gold-soft); color: var(--gold); }
+.match-page .fx-badge-sky { background: var(--sky-soft); color: var(--sky); }
+.match-page .fx-badge-slate { background: var(--slate-soft); color: var(--slate); }
+.match-page .fx-badge-success { background: var(--success-soft); color: var(--success); border-radius: var(--radius-pill); padding: 0 8px; }
+.match-page .fx-badge-danger { background: var(--danger-soft); color: var(--danger); }
+.match-page .fx-badge-warning { background: var(--warning-soft); color: var(--warning); }
+.match-page .fx-badge-pill { border-radius: var(--radius-pill); padding: 0 9px; }
+.match-page .fx-badge-mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+.match-table .pin2 .row-status {
+    min-width: 80px;
+    cursor: help;
+}
+
+/* ========================================
+   PARAMS: the BOM Compare indicators (18px pills, white 8px bold symbol)
+   Overrides the mono 9px pills of matcher.css.
+   ======================================== */
+
+.match-table .param-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: middle;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border: 0;
+    border-radius: 9px;
+    cursor: help;
+    font-family: var(--font-sans);
+    font-size: 8px;
+    line-height: 1;
+    font-weight: bold;
+    color: #ffffff;
+    text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+    white-space: nowrap;
+}
+
+.match-table .param-indicator .param-icon {
+    display: block;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3));
+}
+
+.match-table .param-match { background-color: var(--success); }
+.match-table .param-diff { background-color: var(--danger); }
+.match-table .param-missing { background-color: var(--line-control); color: #ffffff; }
+
+.match-table .param-na {
+    background-color: transparent;
+    border: 2px dashed var(--line-control);
+    color: var(--ink-muted);
+    text-shadow: none;
+}
+
+.match-table .param-acceptable {
+    background-color: var(--amber);
+    color: var(--on-amber);
+    text-shadow: none;
+}
+
+.match-table .param-acceptable .param-icon {
+    filter: none;
+}
+
+#paramIndicatorTooltip {
+    font-family: var(--font-sans);
+}
+
+/* ========================================
+   NARROWER WINDOWS
+   ======================================== */
+
+@media (max-width: 1360px) {
+    .match-head {
+        gap: var(--space-4);
+    }
+
+    .match-title .fx-heading {
+        font-size: 24px;
+        line-height: 30px;
+    }
+
+    .match-actions .btn {
+        padding: 0 12px;
+    }
+
+    .match-actions .btn-toggle {
+        min-width: 124px;
+    }
+
+    .match-actions .match-vsep {
+        margin: 0;
+    }
+}
+
+@media (max-width: 1100px) {
+    .match-head {
+        flex-wrap: wrap;
+    }
+
+    .match-actions {
+        flex-wrap: wrap;
+    }
+
+    .match-filter {
+        flex-wrap: wrap;
+    }
+
+    .mode-hint {
+        margin-left: 0;
+    }
+}
+
+/* ========================================
+   PRINT: the whole table on white
+   ======================================== */
+
+@media print {
+    html,
+    body.fx-page {
+        height: auto;
+        overflow: visible;
+        display: block;
+    }
+
+    .match-actions,
+    .match-back,
+    .match-filter {
+        display: none;
+    }
+
+    .match-sheet {
+        overflow: visible;
+        box-shadow: none;
+    }
+
+    .match-table thead th {
+        position: static;
+    }
+}
+
+/* ========================================
+   ROW PANEL (mt-01d): click a line and a panel opens directly under it.
+   .xwrap has width 0 so it never widens the table; .xpanel is sticky left, gets the visible
+   width of the sheet and zoom = 1 / table zoom (process.js sizePanel), so its text stays at 100%.
+   ======================================== */
+
+.match-table tbody tr.xrow > td {
+    padding: 0;
+    background: var(--surface-sunken);
+    border-bottom: 1px solid var(--sheet-edge);
+    white-space: normal;
+    cursor: default;
+}
+
+.match-table tbody tr.is-open td {
+    border-bottom-color: transparent;
+}
+
+.xwrap {
+    width: 0;
+    min-width: 100%;
+}
+
+.xpanel {
+    position: sticky;
+    left: 0;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: 296px minmax(0, 1fr);
+    gap: 14px;
+    padding: 12px 16px 14px 19px;
+    box-shadow: inset 3px 0 0 var(--steel);
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--ink);
+    text-align: left;
+}
+
+.xlabel {
+    font-size: 11px;
+    line-height: 16px;
+    font-weight: 600;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    white-space: nowrap;
+}
+
+/* Left: the current match and what you can do with it */
+.xcur {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+    padding: 12px 14px;
+    background: var(--surface-raised);
+    border: 1px solid var(--sheet-edge);
+    border-radius: 12px;
+}
+
+.xcur-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 2px;
+}
+
+.xcur-top .fx-badge {
+    min-width: 0;
+    cursor: help;
+}
+
+.xcur-nr {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 20px;
+}
+
+.match-table .xcur-nr .fnr,
+.match-table .xcur-nr .sugg {
+    font-size: 14px;
+}
+
+.xcur-oms {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.xcur-meta,
+.xnote {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.xcur-meta .fx-mono {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink);
+}
+
+.xfacts {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--ink-muted);
+}
+
+.xfacts b {
+    margin-left: 3px;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    color: var(--ink);
+    font-variant-numeric: tabular-nums;
+}
+
+.xnote.is-bad { color: var(--danger); }
+.xnote.is-warn { color: var(--warning); }
+.xnote.is-ok { color: var(--success); }
+
+.xnone {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px 0;
+}
+
+.xnone-title {
+    font-weight: 650;
+    font-size: 15px;
+    line-height: 20px;
+}
+
+.xnone-text {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink-muted);
+}
+
+.xcur-act {
+    margin-top: auto;
+    padding-top: 8px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.xpanel .btn {
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 10px;
+    font-size: 12.5px;
+}
+
+.xpanel .btn svg {
+    width: 15px;
+    height: 15px;
+}
+
+/* Right: candidates (white sheet) and manual search */
+.xright {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.xhead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 30px;
+    min-width: 0;
+}
+
+.xtitle {
+    font-weight: 600;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.xrule {
+    min-width: 0;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.xgrow {
+    flex: 1 1 auto;
+}
+
+.xpanel .btn.xsmall {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 9px;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.xpanel .btn.xclose {
+    color: var(--ink-muted);
+}
+
+.xpanel .btn.xclose:hover:not(:disabled) {
+    color: var(--ink);
+    background: #e1e5ed;
+}
+
+/* Segmented switch (sort, search by) */
+.xseg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    background: #e1e5ed;
+    border-radius: 9px;
+    flex-shrink: 0;
+}
+
+.xseg > button {
+    height: 26px;
+    padding: 0 11px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--ink-muted);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.xseg > button:hover {
+    color: var(--ink);
+}
+
+.xseg > button[aria-pressed="true"] {
+    background: var(--surface-raised);
+    color: var(--ink);
+    box-shadow: 0 1px 2px rgba(20, 24, 40, 0.12);
+}
+
+.xseg > button:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 1px;
+}
+
+/* The candidate table: reset the main-table rules it inherits */
+.xmini {
+    background: var(--surface-raised);
+    border: 1px solid var(--sheet-edge);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.xmini-scroll {
+    height: 170px;
+    overflow: auto;
+}
+
+.xmini table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 12px;
+    line-height: 16px;
+}
+
+.match-table .xmini th,
+.match-table .xmini td {
+    height: 28px;
+    box-sizing: border-box;
+    padding: 2px 8px;
+    background: var(--surface-raised);
+    border-left: 0;
+    border-bottom: 1px solid var(--sheet-row);
+    cursor: default;
+}
+
+.match-table .xmini th:first-child,
+.match-table .xmini td:first-child {
+    padding-left: 12px;
+}
+
+.match-table .xmini thead th {
+    top: 0;
+    z-index: 1;
+    height: auto;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    background: var(--sheet-head);
+    border-bottom: 1px solid var(--sheet-edge);
+}
+
+.match-table .xmini tbody tr:hover td {
+    background: var(--sheet-hover);
+}
+
+.match-table .xmini tbody tr.is-cur td {
+    background: #f4fbf7;
+}
+
+.match-table .xmini tbody tr.is-cur td:first-child {
+    box-shadow: inset 3px 0 0 var(--success);
+}
+
+.match-table .xmini tbody tr.is-cur.is-sugg td {
+    background: var(--sheet-hover);
+}
+
+.match-table .xmini tbody tr.is-cur.is-sugg td:first-child {
+    box-shadow: inset 3px 0 0 var(--ink-muted);
+}
+
+.match-table .xmini tbody tr:last-child td {
+    border-bottom: 1px solid var(--sheet-row);
+}
+
+.match-table .xmini tr.xmsg td {
+    height: 136px;
+    text-align: center;
+    color: var(--ink-muted);
+    white-space: normal;
+}
+
+.match-table .xmini .xact {
+    width: 1%;
+    text-align: right;
+}
+
+.xclip {
+    display: block;
+    max-width: 210px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.xclip-m { max-width: 118px; }
+.xclip-l { max-width: 170px; }
+
+.xpanel .btn.xuse {
+    height: 22px;
+    padding: 0 11px;
+    border-radius: 7px;
+    font-size: 12px;
+}
+
+.xscore {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.xscore-bar {
+    width: 36px;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--sheet-row);
+    overflow: hidden;
+}
+
+.xscore-bar > i {
+    display: block;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--steel);
+}
+
+.xscore-pct {
+    min-width: 30px;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+
+.xsr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+}
+
+/* Manual search */
+.xsearch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.xfield {
+    position: relative;
+    flex: 1 1 auto;
+    max-width: 520px;
+    min-width: 160px;
+}
+
+.xfield svg {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    width: 16px;
+    height: 16px;
+    transform: translateY(-50%);
+    color: var(--ink-muted);
+    pointer-events: none;
+}
+
+.xfield input {
+    width: 100%;
+    height: 32px;
+    box-sizing: border-box;
+    padding: 0 10px 0 34px;
+    border: 1px solid var(--line-control);
+    border-radius: 10px;
+    background: var(--surface-raised);
+    color: var(--ink);
+    font: inherit;
+    font-size: 13px;
+}
+
+.xfield input:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-color: var(--focus);
+}
+
+.xpanel .xsearch .btn {
+    height: 32px;
+    padding: 0 14px;
+    flex-shrink: 0;
+}
+
+.xpanel .xsearch .btn:disabled {
+    opacity: 1;
+    cursor: progress;
+    color: var(--ink-muted);
+}
+
+@media (max-width: 1360px) {
+    .xpanel {
+        grid-template-columns: 264px minmax(0, 1fr);
+        gap: 12px;
+        padding-right: 12px;
+    }
+
+    .match-table .xmini th,
+    .match-table .xmini td {
+        padding-left: 6px;
+        padding-right: 6px;
+    }
+
+    .match-table .xmini th:first-child,
+    .match-table .xmini td:first-child {
+        padding-left: 10px;
+    }
+
+    .xclip { max-width: 172px; }
+    .xclip-m { max-width: 100px; }
+    .xclip-l { max-width: 150px; }
+    .xrule { display: none; }
+}
+
+@media print {
+    .match-table tr.xrow {
+        display: none;
+    }
+}

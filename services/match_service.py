@@ -138,9 +138,12 @@ def _search_row_by_mpn(row_index: int, mpn: str, manufacturer: str = "", selecte
         s['_mpn_highlights'] = get_mpn_highlights(mpn, s.get('Omschrijving', ''))
 
     ranked = _rank_suggestions(results[:20], selected_klant_nr)
-    confidence = 'high' if ranked and ranked[0].get('_exact_match') else ('medium' if ranked else 'none')
-    # Only auto-select for exact matches; partial matches show as suggestion only
-    auto = ranked[0] if confidence == 'high' and ranked else None
+    # Articles with the identical MPN first (stable: keeps the ranking within each group)
+    ranked.sort(key=lambda r: not r.get('_exact_match', False))
+    # Only an identical MPN is assigned automatically. A different MPN (longer, shorter,
+    # packaging suffix) is shown as a suggestion only and has to be picked by hand.
+    auto = next((r for r in ranked if r.get('_exact_match')), None)
+    confidence = 'high' if auto else ('medium' if ranked else 'none')
     display_suggestion = ranked[0] if ranked else None
     auto_str = f" → {auto['FaberNr']}" if auto else ""
     logger.info(f"Row {row_index}: MPN '{mpn}' — {len(results)} hits, {confidence}{auto_str}")
@@ -161,7 +164,8 @@ def _search_row_by_ipn(row_index: int, ipn: str, selected_klant_nr: str = "") ->
     exact = [r for r in results if r.get('FaberNr', '').strip() == ipn.strip()]
     confidence = 'high' if exact else ('medium' if results else 'none')
     ranked = _rank_suggestions(exact if exact else results, selected_klant_nr)
-    auto = ranked[0] if ranked else None
+    # Only the identical FaberNr is assigned automatically; other hits are suggestions
+    auto = ranked[0] if exact and ranked else None
     auto_str = f" → {auto['FaberNr']}" if auto else ""
     logger.info(f"Row {row_index}: IPN '{ipn}' — {len(results)} hits, {len(exact)} exact, {confidence}{auto_str}")
     return {
@@ -169,6 +173,7 @@ def _search_row_by_ipn(row_index: int, ipn: str, selected_klant_nr: str = "") ->
         'search_method': 'ipn_verify',
         'suggestions': _rank_suggestions(results, selected_klant_nr),
         'auto_selected': auto,
+        'display_suggestion': ranked[0] if ranked else None,
         'confidence': confidence
     }
 

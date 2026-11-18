@@ -190,6 +190,7 @@ def get_bom_data():
         'column_mapping': bom_data.get('column_mapping', {}),
         'total_rows': len(bom_data.get('rows', [])),
         'name': bom_data.get('name', ''),
+        'klant_nr': bom_data.get('klant_nr', ''),
         'matches': load_matches() or {},
         'mpnfree': load_mpnfree() or {},
         'selections': load_selections() or {},

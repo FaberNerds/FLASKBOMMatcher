@@ -2,147 +2,236 @@
 
 {% block title %}BOM Matcher - Upload{% endblock %}
 
-{% block topbar_actions %}
-<div style="display: flex; gap: 8px;">
-    <a href="/history" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">History</a>
-    <a href="/settings" class="btn btn-outline" style="color: white; border-color: rgba(255,255,255,0.3);">Settings</a>
-</div>
+{% block extra_styles %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/upload-page.css') }}">
 {% endblock %}
 
 {% block content %}
-<div class="card" style="max-width: 900px; margin: 0 auto;">
-    <div class="card-header">
-        <h2 class="card-title">Upload BOM File</h2>
-        <p class="card-subtitle">Upload an Excel or CSV file, then map columns to proceed</p>
+{# Upload as a stepper in three steps: 1 Load file, 2 Rows, 3 Map and match.
+   One step is open at a time; the others collapse to a one-line summary. upload.js drives the state. #}
+<div class="upload-page up-page" id="uploadPage" data-file-loaded="false">
+    <div class="fx-page-head page-head up-head">
+        <div class="fx-page-head-text">
+            <h1 class="fx-heading">Upload BOM file</h1>
+            <p class="fx-page-sub">Three steps: load the file, set the rows, map and match. Then process.</p>
+        </div>
     </div>
-    <div class="card-body">
-        <!-- Drop Zone -->
-        <div class="upload-zone" id="dropZone">
-            <div class="upload-zone-content">
-                <div style="font-size: 48px; margin-bottom: 12px;">📁</div>
-                <p style="font-size: 16px; font-weight: 600; margin: 0 0 4px;">Drop BOM file here or click to browse</p>
-                <p style="color: var(--text-muted); margin: 0;">Supports .xlsx, .xls, .csv</p>
-            </div>
-            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" style="display: none;">
-        </div>
 
-        <!-- File Info (shown after upload) -->
-        <div id="fileInfo" style="display: none; margin-top: 20px;">
-            <div style="display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--color-success-light); border-radius: var(--radius-md);">
-                <span style="font-size: 20px;">✓</span>
-                <div>
-                    <strong id="fileName"></strong>
-                    <span id="fileRowCount" style="color: var(--text-muted); margin-left: 8px;"></span>
+    <!-- Stepper -->
+    <nav class="fx-glass up-stepper" aria-label="Upload steps">
+        {% for n, title, sub in [(1, 'Load file', 'No file loaded'), (2, 'Rows', 'To do'), (3, 'Map and match', 'To do')] %}
+        <button class="up-stepbtn" type="button" data-step="{{ n }}" id="stepBtn{{ n }}"{% if n == 1 %} aria-current="step"{% else %} disabled{% endif %}>
+            <span class="up-num {{ 'is-current' if n == 1 else 'is-todo' }}" data-num="{{ n }}"><span class="up-num-n">{{ n }}</span>{{ icon('check') }}</span>
+            <span class="up-step-text">
+                <span class="up-step-title">{{ title }}<span class="up-sr" data-sr-state="{{ n }}">, to do</span></span>
+                <span class="up-step-sub" id="stepSub{{ n }}">{{ sub }}</span>
+            </span>
+        </button>
+        {% if n < 3 %}<span class="up-joint" aria-hidden="true"></span>{% endif %}
+        {% endfor %}
+        <span class="up-step-count">Step <span class="fx-mono" id="stepNow">1</span> of <span class="fx-mono">3</span></span>
+    </nav>
+
+    <!-- Step 1: Load file -->
+    <section class="up-step is-open is-todo" id="step1" aria-labelledby="step1Title">
+        <div class="fx-glass up-sum">
+            <span class="up-num is-todo" data-num-sum="1"><span class="up-num-n">1</span>{{ icon('check') }}</span>
+            <span class="up-sum-title">Load file</span>
+            <span class="up-sum-todo">No file loaded yet.</span>
+            <span class="up-sum-file">{{ icon('file') }}<span id="sumFileName"></span></span>
+            <span class="up-facts">
+                <span class="up-fact" id="sumSheetFact"><span class="up-fact-l">Sheet</span><span class="up-fact-v" id="sumSheet">—</span></span>
+                <span class="up-fact"><span class="up-fact-l">Rows</span><span class="up-fact-v" id="sumRows">—</span></span>
+                <span class="up-fact" id="sumSheetsFact"><span class="up-fact-l">Sheets</span><span class="up-fact-v" id="sumSheets">—</span></span>
+            </span>
+            <span class="up-sum-end">
+                <span class="badge badge-gray" data-status="1">To do</span>
+                <button class="btn" type="button" data-go="1">{{ icon('upload') }} Change file</button>
+            </span>
+        </div>
+        <div class="up-open">
+            <div class="up-sec-head">
+                <span class="up-num is-current"><span class="up-num-n">1</span></span>
+                <h2 id="step1Title">Load file</h2>
+                <span class="badge badge-gray" data-status="1">To do</span>
+                <span class="up-sec-hint">Excel or CSV: <span class="fx-mono">.xlsx</span>, <span class="fx-mono">.xls</span>, <span class="fx-mono">.csv</span>.</span>
+            </div>
+            <div class="fx-glass up-panel">
+                <!-- Drop zone: the empty state before a file is loaded, the file card after -->
+                <div class="up-drop" id="dropZone" role="button" tabindex="0" aria-label="Choose a BOM file">
+                    <div class="up-drop-empty">
+                        <span class="up-drop-icon">{{ icon('upload') }}</span>
+                        <p class="up-drop-title">Drop BOM file here or click to browse</p>
+                        <p class="up-drop-sub">Supports <span class="fx-mono">.xlsx</span>, <span class="fx-mono">.xls</span>, <span class="fx-mono">.csv</span></p>
+                    </div>
+                    <div class="up-filecard" id="fileInfo">
+                        <span class="up-filecard-ico">{{ icon('file') }}</span>
+                        <span class="up-filecard-text">
+                            <strong class="up-filecard-name" id="fileName"></strong>
+                            <span class="up-filecard-sub"><span id="fileRowCount"></span><span id="fileSheetCount"></span> · drop another file here to replace it</span>
+                        </span>
+                        <span class="btn up-filecard-btn">{{ icon('upload') }} Choose another file</span>
+                    </div>
+                </div>
+
+                <!-- Sheet (only for a workbook with more than one sheet) -->
+                <div class="up-group" id="sheetSelector" hidden>
+                    <span class="up-label" id="sheetLabel">Sheet</span>
+                    <div class="up-seg" id="sheetSeg" role="radiogroup" aria-labelledby="sheetLabel"></div>
+                    <span class="up-hint" id="sheetHint"></span>
                 </div>
             </div>
-        </div>
-
-        <!-- Sheet Selector -->
-        <div id="sheetSelector" style="display: none; margin-top: 16px;">
-            <label class="form-label">Sheet</label>
-            <select id="sheetSelect" class="form-select">
-            </select>
-        </div>
-
-        <!-- Row Range Controls -->
-        <div id="rowRangeSection" style="display: none; margin-top: 16px;">
-            <label class="form-label">Data Row Range</label>
-            <div class="row-range-section">
-                <div class="row-range-input">
-                    <label>Start row:</label>
-                    <input type="number" id="startRowInput" min="1" class="form-input" placeholder="All">
-                </div>
-                <div class="row-range-input">
-                    <label>End row:</label>
-                    <input type="number" id="endRowInput" min="1" class="form-input" placeholder="All">
-                </div>
-                <button class="btn btn-outline row-range-apply" onclick="applyRowRange()">Apply</button>
-                <button class="btn btn-outline row-range-apply" onclick="clearRowRange()" style="color: var(--text-muted);">Clear</button>
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden>
+            <div class="up-actions" id="step1Actions" hidden>
+                <button class="btn btn-primary" type="button" data-go="2">Continue to rows {{ icon('next') }}</button>
             </div>
         </div>
+    </section>
 
-        <!-- Preview Table -->
-        <div id="previewSection" style="display: none; margin-top: 20px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Preview (right-click rows to set header/range)</h3>
-            <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: var(--radius-md);">
-                <table class="data-table" id="previewTable">
+    <!-- Step 2: Rows -->
+    <section class="up-step is-todo" id="step2" aria-labelledby="step2Title">
+        <div class="fx-glass up-sum">
+            <span class="up-num is-todo" data-num-sum="2"><span class="up-num-n">2</span>{{ icon('check') }}</span>
+            <span class="up-sum-title">Rows</span>
+            <span class="up-sum-todo">Available after a file is loaded.</span>
+            <span class="up-facts">
+                <span class="up-fact"><span class="up-fact-l">Header row</span><span class="up-fact-v" id="sumHead">—</span></span>
+                <span class="up-fact"><span class="up-fact-l">Data rows</span><span class="up-fact-v" id="sumRange">—</span></span>
+            </span>
+            <span class="up-sum-end">
+                <span class="badge badge-gray" data-status="2">To do</span>
+                <button class="btn" type="button" data-go="2">{{ icon('edit') }} Edit rows</button>
+            </span>
+        </div>
+        <div class="up-open">
+            <div class="up-sec-head">
+                <span class="up-num is-current"><span class="up-num-n">2</span></span>
+                <h2 id="step2Title">Rows</h2>
+                <span class="badge badge-gray" data-status="2">To do</span>
+                <span class="up-sec-hint">Only the rows in the range are matched. Rows are numbered as in the sheet.</span>
+            </div>
+            <div class="fx-glass up-panel" id="rowRangeSection">
+                <div class="up-rows-ctl">
+                    <label class="up-group"><span class="up-label">Header row</span>
+                        <input class="up-input" id="headerRowInput" type="number" min="1" inputmode="numeric"></label>
+                    <label class="up-group"><span class="up-label">First data row</span>
+                        <input class="up-input" id="startRowInput" type="number" min="1" inputmode="numeric" placeholder="All"></label>
+                    <label class="up-group"><span class="up-label">Last data row</span>
+                        <input class="up-input" id="endRowInput" type="number" min="1" inputmode="numeric" placeholder="All"></label>
+                    <button class="btn" type="button" onclick="applyRowRange()">{{ icon('check') }} Apply range</button>
+                    <button class="btn btn-ghost" type="button" onclick="clearRowRange()">{{ icon('reset') }} Clear range</button>
+                    <span class="up-tip">Right-click a row in the sheet to set it as header, first or last row.</span>
+                </div>
+            </div>
+            <div class="up-sheet-head">
+                <h3 class="up-sheet-title">Rows in the sheet<span class="up-sec-hint" id="rowsSheetHint"></span></h3>
+            </div>
+            <div class="up-sheet up-sheet-tall" id="previewSection">
+                <table class="up-table up-raw" id="previewTable">
                     <thead id="previewHead"></thead>
                     <tbody id="previewBody"></tbody>
                 </table>
             </div>
-        </div>
-
-        <!-- Previous Version (Exact) -->
-        <div id="previousBomSection" style="display: none; margin-top: 24px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Previous Version (Exact)</h3>
-            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
-                Enter the article number of the previous board version to fetch its BOM from Exact.
-                When loaded, Process BOM matches this new BOM against the old one (reusing already-purchased
-                Faber articles) instead of the live ERP catalog.
-            </p>
-            <div style="display: flex; gap: 8px; align-items: center; max-width: 480px;">
-                <input type="text" id="previousArticleId" class="form-input" placeholder="e.g. 300001234"
-                       autocomplete="off" style="flex: 1;"
-                       onkeydown="if(event.key==='Enter'){event.preventDefault();fetchPreviousBom();}">
-                <button class="btn btn-primary" id="fetchPreviousBtn" onclick="fetchPreviousBom()">Fetch</button>
-            </div>
-            <div id="previousBomInfo" style="display: none; margin-top: 10px; padding: 8px 12px; background: var(--color-success-light); border-radius: var(--radius-md); align-items: center; gap: 8px;">
-                <span style="font-size: 16px;">✅</span>
-                <span id="previousBomInfoText"></span>
-                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px; margin-left: auto;" onclick="clearPreviousBom()">✕ Clear</button>
+            <div class="up-actions">
+                <button class="btn btn-primary" type="button" data-go="3">Continue to mapping {{ icon('next') }}</button>
             </div>
         </div>
+    </section>
 
-        <!-- Column Mapping -->
-        <div id="mappingSection" style="display: none; margin-top: 24px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Column Mapping</h3>
-            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 16px;">
-                Map your BOM columns to standard fields. Select multiple columns to combine them. Description is required.
-            </p>
-            <div class="mapping-grid" id="mappingGrid">
-                <!-- Filled by JS -->
-            </div>
+    <!-- Step 3: Map and match -->
+    <section class="up-step is-todo" id="step3" aria-labelledby="step3Title">
+        <div class="fx-glass up-sum">
+            <span class="up-num is-todo" data-num-sum="3"><span class="up-num-n">3</span>{{ icon('check') }}</span>
+            <span class="up-sum-title">Map and match</span>
+            <span class="up-sum-todo">Available after a file is loaded.</span>
+            <span class="up-facts">
+                <span class="up-fact"><span class="up-fact-l">Fields</span><span class="up-fact-v" id="sumFields">—</span></span>
+                <span class="up-fact"><span class="up-fact-l">Klant</span><span class="up-fact-v" id="sumKlant">—</span></span>
+                <span class="up-fact"><span class="up-fact-l">Match against</span><span class="up-fact-v" id="sumAgainst">—</span></span>
+            </span>
+            <span class="up-sum-end">
+                <span class="badge badge-gray" data-status="3">To do</span>
+                <button class="btn" type="button" data-go="3">{{ icon('edit') }} Edit mapping</button>
+            </span>
         </div>
+        <div class="up-open">
+            <div class="up-sec-head">
+                <span class="up-num is-current"><span class="up-num-n">3</span></span>
+                <h2 id="step3Title">Map and match</h2>
+                <span class="badge badge-gray" data-status="3">To do</span>
+                <span class="up-sec-hint">Pick more columns to combine them. Description is required.</span>
+            </div>
+            <div class="fx-glass up-panel">
+                <!-- Column mapping: filled by upload.js -->
+                <div class="up-map" id="mappingGrid"></div>
+                <div class="up-hair"></div>
+                <div class="up-pair">
+                    <!-- Klant (customer) -->
+                    <div class="up-group" id="customerSection">
+                        <span class="up-label" id="klantLabel">Klant</span>
+                        <div class="up-box" id="customerBox">
+                            {{ icon('search') }}
+                            <span class="up-klant" id="selectedCustomer" style="display: none;">
+                                <span id="selectedCustomerText"></span>
+                                <button type="button" onclick="clearCustomerSelection()" aria-label="Clear customer" title="Clear customer">{{ icon('close') }}</button>
+                            </span>
+                            <input type="text" id="customerSearch" placeholder="Search customer by name or number"
+                                   autocomplete="off" aria-labelledby="klantLabel">
+                            <div id="customerDropdown" class="customer-dropdown up-dropdown" style="display: none;"></div>
+                        </div>
+                        <span class="up-hint" id="customerHint">Empty: generic matching without customer-specific parts.</span>
+                    </div>
 
-        <!-- Customer Selector -->
-        <div id="customerSection" style="display: none; margin-top: 24px;">
-            <h3 style="font-size: 14px; margin-bottom: 12px;">Klant (Customer)</h3>
-            <p style="color: var(--text-muted); font-size: 12px; margin-bottom: 12px;">
-                Select a customer to include customer-specific parts in matching. Leave empty for generic matching.
-            </p>
-            <div style="position: relative;">
-                <input type="text" id="customerSearch" class="form-input" placeholder="Search customer..."
-                       autocomplete="off" style="width: 100%; max-width: 400px;">
-                <div id="customerDropdown" class="customer-dropdown" style="display: none;">
+                    <!-- Previous version (Exact) -->
+                    <div class="up-group up-prev" id="previousBomSection">
+                        <span class="up-label" id="prevLabel">Previous version (Exact)</span>
+                        <div class="up-inline">
+                            <input type="text" id="previousArticleId" class="up-input" placeholder="e.g. 300001234"
+                                   autocomplete="off" aria-labelledby="prevLabel"
+                                   onkeydown="if(event.key==='Enter'){event.preventDefault();fetchPreviousBom();}">
+                            <button class="btn" type="button" id="fetchPreviousBtn" onclick="fetchPreviousBom()">{{ icon('database') }} Fetch</button>
+                        </div>
+                        <span class="up-hint up-prev-empty">Empty: matches against the live ERP catalog. Fetch the previous board version to reuse its purchased Faber articles.</span>
+                        <div class="up-prev-ok" id="previousBomInfo" style="display: none;">
+                            <span class="badge badge-success">✓ Loaded</span>
+                            <span class="up-prev-text" id="previousBomInfoText"></span>
+                            <button class="btn btn-ghost btn-small" type="button" onclick="clearPreviousBom()">{{ icon('close') }} Clear</button>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div id="selectedCustomer" style="display: none; margin-top: 8px; padding: 8px 12px; background: var(--color-success-light); border-radius: var(--radius-md); align-items: center; gap: 8px;">
-                <span id="selectedCustomerText"></span>
-                <button class="btn btn-outline" style="padding: 2px 8px; font-size: 11px;" onclick="clearCustomerSelection()">✕</button>
-            </div>
-        </div>
 
-        <!-- Process Button -->
-        <div id="processSection" style="display: none; margin-top: 24px; justify-content: space-between; align-items: center;">
-            <button class="btn btn-outline" id="clearProcessDataBtn" onclick="clearProcessData()" style="display: none; color: var(--color-warning); border-color: var(--color-warning);">
-                Clear stored process data
-            </button>
-            <div style="margin-left: auto;">
-                <button class="btn btn-primary btn-lg" id="processBtn" onclick="processBom()">
-                    Process BOM &gt;&gt;
+            <div class="up-sheet-head">
+                <h3 class="up-sheet-title">Preview<span class="up-sec-hint" id="mapPreviewHint"></span></h3>
+                <span class="up-sec-hint">Mapped columns are tinted, with the field name under the column name.</span>
+            </div>
+            <div class="up-sheet">
+                <table class="up-table" id="mapPreviewTable">
+                    <thead id="mapPreviewHead"></thead>
+                    <tbody id="mapPreviewBody"></tbody>
+                </table>
+            </div>
+
+            <div class="up-actions" id="processSection">
+                <button class="btn btn-ghost up-danger" type="button" id="clearProcessDataBtn" onclick="clearProcessData()" style="display: none;">
+                    {{ icon('trash') }} Clear stored process data
+                </button>
+                <button class="btn btn-primary up-process" type="button" id="processBtn" onclick="processBom()">
+                    Process BOM {{ icon('next') }}
                 </button>
             </div>
         </div>
-    </div>
+    </section>
 </div>
-<!-- Right-click context menu -->
-<div id="rowContextMenu" class="row-context-menu" style="display: none;">
-    <div class="context-menu-item" onclick="setAsHeaderRow()">📋 Set as Header Row</div>
+
+<!-- Right-click context menu (rows in step 2) -->
+<div id="rowContextMenu" class="row-context-menu" style="display: none;" role="menu">
+    <div class="context-menu-item" role="menuitem" onclick="setAsHeaderRow()">{{ icon('row-header') }} Set as header row</div>
     <div class="context-menu-divider"></div>
-    <div class="context-menu-item" onclick="setAsStartRow()">📍 Set as Start Row</div>
-    <div class="context-menu-item" onclick="setAsEndRow()">🏁 Set as End Row</div>
+    <div class="context-menu-item" role="menuitem" onclick="setAsStartRow()">{{ icon('row-start') }} Set as first data row</div>
+    <div class="context-menu-item" role="menuitem" onclick="setAsEndRow()">{{ icon('row-end') }} Set as last data row</div>
     <div class="context-menu-divider"></div>
-    <div class="context-menu-item" onclick="clearRowRangeMenu()">❌ Clear Selection</div>
+    <div class="context-menu-item" role="menuitem" onclick="clearRowRangeMenu()">{{ icon('close') }} Clear range</div>
 </div>
 {% endblock %}
 

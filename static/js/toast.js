@@ -28,11 +28,12 @@ class ToastManager {
      * @param {string} message - The message to display
      * @param {string} type - Type of toast (success, error, warning, info)
      * @param {number} duration - Duration in milliseconds (0 = no auto-dismiss)
+     * @param {{label: string, onClick: Function}} [action] - Optional button (e.g. Undo); clicking it dismisses the toast
      * @returns {number} Toast ID for manual dismissal
      */
-    show(message, type = 'info', duration = 4000) {
+    show(message, type = 'info', duration = 4000, action = null) {
         const id = this.idCounter++;
-        const toast = this.createToast(id, message, type);
+        const toast = this.createToast(id, message, type, action);
 
         this.container.appendChild(toast);
         this.toasts.set(id, toast);
@@ -57,24 +58,30 @@ class ToastManager {
      * @param {string} type - Toast type
      * @returns {HTMLElement} The toast element
      */
-    createToast(id, message, type) {
+    createToast(id, message, type, action = null) {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
         toast.setAttribute('role', 'alert');
         toast.setAttribute('data-toast-id', id);
 
-        const icons = {
-            success: '✓',
-            error: '✕',
-            warning: '⚠',
-            info: 'ℹ'
-        };
-
+        // Faber Huisstijl: a small square in the status colour, the message carries the meaning
         toast.innerHTML = `
-            <div class="toast-icon" aria-hidden="true">${icons[type] || icons.info}</div>
+            <span class="toast-icon" aria-hidden="true"></span>
             <div class="toast-message">${this.escapeHtml(message)}</div>
-            <button class="toast-close" aria-label="Close notification">×</button>
+            <button type="button" class="toast-close" aria-label="Close notification"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg></button>
         `;
+
+        if (action && action.label) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'toast-action';
+            btn.textContent = action.label;
+            btn.addEventListener('click', () => {
+                this.dismiss(id);
+                if (typeof action.onClick === 'function') action.onClick();
+            });
+            toast.insertBefore(btn, toast.querySelector('.toast-close'));
+        }
 
         // Add close button handler
         toast.querySelector('.toast-close').addEventListener('click', () => {
@@ -144,7 +151,7 @@ class ToastManager {
                 if (toast) {
                     const messageEl = toast.querySelector('.toast-message');
                     if (messageEl) {
-                        messageEl.textContent = this.escapeHtml(newMessage);
+                        messageEl.textContent = newMessage;
                     }
                 }
             },

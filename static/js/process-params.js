@@ -481,117 +481,124 @@ function getIndicatorClass(status) {
 }
 
 // ============================================================
-// POPULATE PARAMS TABLE
+// PARAM CELLS OF THE UNIFIED ROWS
 // ============================================================
 
+// The house-style package icon inside the 18px indicator (as BOM Compare's results-params.js)
+const PACKAGE_ICON = '<svg class="param-icon" viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-label="Package" role="img"><path d="M8 1.75l5.75 3v6.5L8 14.25l-5.75-3v-6.5z"/><path d="M2.25 4.75L8 7.75l5.75-3"/><path d="M8 7.75v6.5"/></svg>';
+
+/** True once the package aliases and tags are loaded (needed for the package extraction). */
+function paramSettingsLoaded() {
+    return _packageAliases !== null && _packageTags !== null;
+}
+
+/** Load the package aliases and tags once (both in parallel). */
+async function ensureParamSettings() {
+    const jobs = [];
+    if (_packageAliases === null) jobs.push(loadPackageAliases());
+    if (_packageTags === null) jobs.push(loadPackageTags());
+    await Promise.all(jobs);
+}
+
+function _paramNaCells(tip) {
+    const t = escapeHtml(tip || '');
+    let html = '';
+    for (let k = 0; k < 5; k++) {
+        html += `<td class="pc${k === 0 ? ' g-start' : ''}"><span class="param-indicator param-na" data-tip="${t}">–</span></td>`;
+    }
+    return html;
+}
+
 /**
- * Populate the params comparison table on the process page.
- * Reads bomData, matchResults, and selections globals from process.js.
+ * The five parameter cells (value, tolerance, voltage, power, package) of one BOM line:
+ * the customer BOM description (main) against the ERP Omschrijving of the line's match.
+ * Reads bomData, matchResults and selections from process.js.
+ */
+function buildMatcherParamCells(rowIndex) {
+    if (!bomData) return _paramNaCells('');
+    const mapping = bomData.column_mapping || {};
+    const row = (bomData.rows || [])[rowIndex] || {};
+    const strIdx = String(rowIndex);
+    const match = matchResults[strIdx];
+    const sel = selections[strIdx] || {};
+
+    // Get customer BOM description (left side, supports multi-column mapping)
+    const descMapping = mapping['Description'];
+    let customerDesc = '';
+    if (Array.isArray(descMapping)) {
+        customerDesc = descMapping.map(c => String(row[c] || '').trim()).filter(v => v).join(' ');
+    } else if (descMapping) {
+        customerDesc = String(row[descMapping] || '');
+    }
+
+    // Get ERP match description (right side)
+    let displayItem = null;
+    if (sel.fabernr && match && match.suggestions) {
+        displayItem = match.suggestions.find(s => s.FaberNr === sel.fabernr);
+    }
+    if (!displayItem && match && match.auto_selected) {
+        displayItem = match.auto_selected;
+    }
+    if (!displayItem && match && match.display_suggestion) {
+        displayItem = match.display_suggestion;
+    }
+    if (!displayItem) return _paramNaCells(match ? 'No ERP match' : 'Not matched yet');
+    const erpDesc = String(displayItem.Omschrijving || '');
+
+    // Strip HTML tags from descriptions (they may contain highlight spans)
+    const cleanCustomerDesc = customerDesc.replace(/<[^>]*>/g, '');
+    const cleanErpDesc = erpDesc.replace(/<[^>]*>/g, '');
+
+    // Extract and compare parameters (customer BOM = main = 1)
+    const params = extractParametersFromDescription(cleanCustomerDesc, cleanErpDesc, 1);
+
+    const hasAnyParam = params.value1 || params.value2 ||
+        params.tolerance1 || params.tolerance2 ||
+        params.voltage1 || params.voltage2 ||
+        params.package1 || params.package2;
+    if (!hasAnyParam) return _paramNaCells('No parameters found');
+
+    const isCapacitor = (params.value1 && /[pnuµ]F/i.test(params.value1)) ||
+        (params.value2 && /[pnuµ]F/i.test(params.value2));
+    const valueSymbol = isCapacitor ? '-||-' : 'Ω';
+
+    const fmt = (bom, erp) => escapeHtml(`BOM: ${bom || '—'} | ERP: ${erp || '—'}`);
+    const ind = (status, tip, symbol) =>
+        `<span class="param-indicator ${getIndicatorClass(status)}" data-tip="${tip}">${symbol}</span>`;
+
+    return `<td class="pc g-start">${ind(params.valueStatus, fmt(params.value1, params.value2), valueSymbol)}</td>` +
+        `<td class="pc">${ind(params.toleranceStatus, fmt(params.tolerance1, params.tolerance2), '%')}</td>` +
+        `<td class="pc">${ind(params.voltageStatus, fmt(params.voltage1, params.voltage2), 'V')}</td>` +
+        `<td class="pc">${ind(params.powerStatus, fmt(params.power1, params.power2), 'P')}</td>` +
+        `<td class="pc">${ind(params.packageStatus, fmt(params.package1, params.package2), PACKAGE_ICON)}</td>`;
+}
+
+/**
+ * Fill the param cells of the unified rows on the process page (after the package
+ * settings are loaded). renderTables() builds the cells inline when the settings are
+ * already there; this is the path for a render before they arrived.
  */
 async function populateMatcherParamsTable() {
-    const tbody = document.getElementById('paramsTableBody');
+    const tbody = document.getElementById('matchTableBody');
     if (!tbody || !bomData) return;
 
     // Ensure aliases and package tags are loaded before extraction
-    if (_packageAliases === null) await loadPackageAliases();
-    if (_packageTags === null) await loadPackageTags();
+    await ensureParamSettings();
 
-    tbody.innerHTML = '';
-    const mapping = bomData.column_mapping || {};
-    const rows = bomData.rows || [];
-    let extractedCount = 0;
-
-    for (let i = 0; i < rows.length; i++) {
-        const row = rows[i];
-        const strIdx = String(i);
-        const match = matchResults[strIdx];
-        const sel = selections[strIdx] || {};
-
-        // Get customer BOM description (left side, supports multi-column mapping)
-        const descMapping = mapping['Description'];
-        let customerDesc = '';
-        if (Array.isArray(descMapping)) {
-            customerDesc = descMapping.map(c => String(row[c] || '').trim()).filter(v => v).join(' ');
-        } else if (descMapping) {
-            customerDesc = String(row[descMapping] || '');
-        }
-
-        // Get ERP match description (right side)
-        let erpDesc = '';
-        let displayItem = null;
-        if (sel.fabernr && match && match.suggestions) {
-            displayItem = match.suggestions.find(s => s.FaberNr === sel.fabernr);
-        }
-        if (!displayItem && match && match.auto_selected) {
-            displayItem = match.auto_selected;
-        }
-        if (!displayItem && match && match.display_suggestion) {
-            displayItem = match.display_suggestion;
-        }
-        if (displayItem) {
-            erpDesc = String(displayItem.Omschrijving || '');
-        }
-
-        // Strip HTML tags from descriptions (they may contain highlight spans)
-        const cleanCustomerDesc = customerDesc.replace(/<[^>]*>/g, '');
-        const cleanErpDesc = erpDesc.replace(/<[^>]*>/g, '');
-
-        // Extract and compare parameters (customer BOM = main = 1)
-        const params = extractParametersFromDescription(cleanCustomerDesc, cleanErpDesc, 1);
-
-        const tr = document.createElement('tr');
-        tr.dataset.row = i;
-        tr.addEventListener('click', () => selectRow(i));
-
-        // Highlight selected row
-        if (selectedRow === i) {
-            tr.classList.add('row-selected');
-        }
-
-        const hasAnyParam = params.value1 || params.value2 ||
-            params.tolerance1 || params.tolerance2 ||
-            params.voltage1 || params.voltage2 ||
-            params.package1 || params.package2;
-
-        if (hasAnyParam) {
-            extractedCount++;
-            const isCapacitor = (params.value1 && /[pnuµ]F/i.test(params.value1)) ||
-                (params.value2 && /[pnuµ]F/i.test(params.value2));
-            const valueSymbol = isCapacitor ? '-||-' : 'Ω';
-
-            const fmt = (bom, erp) => `BOM: ${bom || '\u2014'} | ERP: ${erp || '\u2014'}`;
-
-            tr.innerHTML = `
-                <td><span class="param-indicator ${getIndicatorClass(params.valueStatus)}" data-tip="${fmt(params.value1, params.value2)}">${valueSymbol}</span></td>
-                <td><span class="param-indicator ${getIndicatorClass(params.toleranceStatus)}" data-tip="${fmt(params.tolerance1, params.tolerance2)}">%</span></td>
-                <td><span class="param-indicator ${getIndicatorClass(params.voltageStatus)}" data-tip="${fmt(params.voltage1, params.voltage2)}">V</span></td>
-                <td><span class="param-indicator ${getIndicatorClass(params.powerStatus)}" data-tip="${fmt(params.power1, params.power2)}">P</span></td>
-                <td><span class="param-indicator ${getIndicatorClass(params.packageStatus)}" data-tip="${fmt(params.package1, params.package2)}">📦</span></td>
-            `;
-        } else {
-            tr.innerHTML = `
-                <td><span class="param-indicator param-na">-</span></td>
-                <td><span class="param-indicator param-na">-</span></td>
-                <td><span class="param-indicator param-na">-</span></td>
-                <td><span class="param-indicator param-na">-</span></td>
-                <td><span class="param-indicator param-na">-</span></td>
-            `;
-        }
-
-        tbody.appendChild(tr);
-    }
-
-    // Update stats
-    const stats = document.getElementById('paramsStats');
-    if (stats) stats.textContent = extractedCount;
+    tbody.querySelectorAll('tr[data-row]').forEach(tr => {
+        const cells = tr.querySelectorAll('td.pc');
+        if (cells.length !== 5) return;
+        const tmp = document.createElement('tr');
+        tmp.innerHTML = buildMatcherParamCells(parseInt(tr.dataset.row, 10));
+        const fresh = Array.from(tmp.children);
+        cells.forEach((td, k) => { if (fresh[k]) td.replaceWith(fresh[k]); });
+    });
 
     // Init custom tooltips
     initParamIndicatorTooltips();
 
-    // Re-sync row heights after params table is populated
-    requestAnimationFrame(() => {
-        if (typeof syncRowHeights === 'function') syncRowHeights();
-    });
+    // The indicator column widths may have changed: fit the table again
+    if (typeof fitMatchTable === 'function') fitMatchTable();
 }
 
 // ============================================================
@@ -607,12 +614,10 @@ function initParamIndicatorTooltips() {
         document.body.appendChild(tooltip);
     }
 
-    // Use event delegation on the params scroll wrapper
-    const wrapper = document.getElementById('paramsScroll');
+    // Event delegation on the scroll container of the one table (it survives re-renders)
+    const wrapper = document.getElementById('matchSheet');
     if (!wrapper) return;
 
-    // Remove old listeners by replacing the wrapper's event-delegating clone
-    // (safe: only the event listeners are removed, children stay)
     if (wrapper._paramTooltipInit) return;
     wrapper._paramTooltipInit = true;
 
@@ -628,6 +633,7 @@ function initParamIndicatorTooltips() {
         const indicator = e.target.closest('.param-indicator');
         if (indicator && indicator.dataset.tip) {
             tooltip.textContent = indicator.dataset.tip;
+            tooltip.classList.add('visible');
 
             const tooltipRect = tooltip.getBoundingClientRect();
             const tooltipWidth = tooltipRect.width || 150;
@@ -642,13 +648,18 @@ function initParamIndicatorTooltips() {
 
             tooltip.style.left = x + 'px';
             tooltip.style.top = y + 'px';
+        } else {
+            tooltip.classList.remove('visible');
         }
     }, true);
 
     wrapper.addEventListener('mouseleave', (e) => {
         const indicator = e.target.closest('.param-indicator');
-        if (indicator) {
+        if (indicator || e.target === wrapper) {
             tooltip.classList.remove('visible');
         }
     }, true);
+
+    // A re-render or scroll can remove the indicator under the mouse: hide the tooltip
+    wrapper.addEventListener('scroll', () => tooltip.classList.remove('visible'), { passive: true });
 }
