@@ -14,7 +14,6 @@
     --sheet-col: #f0f1f4;
     --sheet-hover: #f7f8fb;
     --shadow-sheet: 0 1px 2px rgba(20, 24, 40, 0.06), 0 4px 14px rgba(20, 24, 40, 0.06);
-    --desc-w: 220px;
 }
 
 /* ========================================
@@ -289,9 +288,11 @@
     box-shadow: var(--shadow-sheet);
 }
 
-/* Auto fit (process.js fitMatchTable): measured at 100%, then zoom = available / needed, never below 60% */
+/* Fixed column widths from the <colgroup> (process.js renderTableHead): the user drags them.
+   The last (filler) column takes the space that is left; a wider table scrolls sideways. */
 .match-table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: separate;
     border-spacing: 0;
     font-size: 12px;
@@ -530,9 +531,26 @@
     color: var(--ink-muted);
 }
 
+/* Text that does not fit its column ends in "..." (the full text is in the title) */
+.match-table thead tr.cols th,
+.match-table tr[data-row] > td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.match-table col.col-pin1 {
+    width: 46px;
+}
+
+.match-table th.fill,
+.match-table td.fill {
+    padding: 0;
+    border-left: 0;
+}
+
 .match-table .clip {
     display: block;
-    max-width: 152px;
+    max-width: none;
     overflow: hidden;
     text-overflow: ellipsis;
     /* room for the 2-3px highlight underlines inside the clipped box */
@@ -540,21 +558,6 @@
     margin: -1px 0 -3px;
 }
 
-.match-table .clip-desc {
-    max-width: var(--desc-w);
-}
-
-.match-table .clip-m {
-    max-width: 110px;
-}
-
-.match-table .clip-s {
-    max-width: 92px;
-}
-
-.match-table .clip-t {
-    max-width: 120px;
-}
 
 /* MPN: the green underline means the same MPN as the customer BOM, amber that it only resembles
    it (process.js mpnMatchType). The dotted "clickable" hint only shows on hover, so a plain MPN
@@ -601,19 +604,41 @@
     font-size: 11px;
 }
 
-/* Description resize handle (both description columns share the width) */
-.match-table thead th.desc-th {
-    position: sticky;
-}
-
+/* Column resize handle: the right border of every column header (sticky th = its anchor) */
 .match-table .col-resize-handle {
     position: absolute;
     top: 0;
-    right: -2px;
+    right: 0;
     bottom: 0;
-    width: 5px;
+    width: 7px;
     cursor: col-resize;
     z-index: 3;
+}
+
+.match-table .col-resize-handle::after {
+    content: "";
+    position: absolute;
+    top: 6px;
+    bottom: 6px;
+    right: 0;
+    width: 2px;
+    border-radius: 1px;
+    background: transparent;
+}
+
+.match-table thead th:hover .col-resize-handle::after {
+    background: var(--line-control);
+}
+
+.match-table .col-resize-handle:hover::after,
+.match-table .col-resize-handle.active::after {
+    background: var(--steel);
+}
+
+body.col-resizing,
+body.col-resizing * {
+    cursor: col-resize !important;
+    user-select: none;
 }
 
 /* ========================================
