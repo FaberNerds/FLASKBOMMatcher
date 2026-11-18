@@ -21,7 +21,7 @@ def assess_mpnfree_batch_local(rows: list[dict]) -> list[dict]:
         mfr = row.get('manufacturer', '')
         idx = row['index']
 
-        category = detect_category(desc)
+        category = detect_category(desc, row.get('refdes', ''))
         if category:
             is_free = is_generic_rc(category)
             results.append({

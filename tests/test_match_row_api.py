@@ -87,3 +87,20 @@ def test_manual_search_preview_leaves_the_match(client, store, monkeypatch):
     # Without preview the search still replaces the stored match, as before
     client.post('/api/match/manual-search', json={'row_index': 0, 'search_type': 'mpn', 'query': 'CL10'})
     assert store['matches']['0']['auto_selected'] == {'FaberNr': '311999'}
+
+
+def test_bom_data_gives_type_and_refdes_number_per_line(client, monkeypatch):
+    from routes import upload_api
+    bom = {
+        'name': 'x.xlsx',
+        'rows': [{'D': 'Inductor 2.2uH 0.116Ohm DCR', 'Ref': 'L3'}, {'D': 'Generic Capacitor', 'Ref': 'C12, C3'},
+                 {'D': 'RES 10K 0603', 'Ref': ''}, {'D': 'MCU 170MHz', 'Ref': 'U1'}],
+        'column_mapping': {'Description': 'D', 'Refdes': 'Ref'},
+    }
+    monkeypatch.setattr(upload_api, 'load_bom_data', lambda: bom)
+    for name in ('load_matches', 'load_mpnfree', 'load_selections'):
+        monkeypatch.setattr(upload_api, name, lambda: {})
+
+    data = client.get('/api/bom-data').get_json()
+    assert data['row_types'] == ['inductor', 'capacitor', 'resistor', 'other']
+    assert data['row_refdes_num'] == [3, 3, None, 1]

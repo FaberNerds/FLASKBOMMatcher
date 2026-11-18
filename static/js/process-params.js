@@ -21,7 +21,7 @@ async function loadPackageAliases() {
 // and by the value parsers that must not read e.g. "1608M" as megaohms.
 const PACKAGE_CODES = [
     '01005', '0201', '0402', '0603', '0805', '1005', '1206', '1210',
-    '1608', '1812', '2010', '2012', '2220', '2512'
+    '1608', '1616', '1812', '2010', '2012', '2220', '2512', '2520'
 ];
 
 // Package prefix/suffix tags (loaded from settings; same defaults as Python backend)
@@ -128,10 +128,15 @@ function extractToleranceFromDescription(text) {
     if (reversedMatches.length > 0) {
         return reversedMatches[0][1].replace(',', '.') + '%';
     }
-    const absPattern = /[±]|[+]\s*[\/\-]\s*[\-]?\s*(\d+(?:[.,]\d+)?)\s*(pF|nF|uF|µF|fF)/gi;
+    // Absolute capacitor tolerance with a ±, +/- or +- prefix: ±0.05pF, +/-0,05pF, and the short
+    // "+/-0,05P" (P = pF) used in Exact descriptions (as BOM Compare). The prefix is required, so
+    // the capacitance itself (0,5pF) is never taken for the tolerance.
+    const absPattern = /(?:±|\+\s*\/?\s*-)\s*(\d+(?:[.,]\d+)?)\s*(pF|nF|uF|µF|fF|P)(?![A-Za-z])/gi;
     const absMatches = [...text.matchAll(absPattern)];
-    if (absMatches.length > 0 && absMatches[0][1]) {
-        return absMatches[0][1].replace(',', '.') + absMatches[0][2].replace('µ', 'u');
+    if (absMatches.length > 0) {
+        const value = absMatches[0][1].replace(',', '.');
+        const unit = absMatches[0][2].toLowerCase().replace('µ', 'u');
+        return value + ({ p: 'pF', pf: 'pF', nf: 'nF', uf: 'uF', ff: 'fF' }[unit] || unit);
     }
     const ffPattern = /(?:^|[\s,;])(\d+(?:[.,]\d+)?)\s*(fF)\b/gi;
     const ffMatches = [...text.matchAll(ffPattern)];
@@ -283,9 +288,45 @@ function extractPackageFromDescription(text) {
  * @param {string} desc2 - ERP description
  * @param {number} mainBomNum - Which is the main reference (always 1)
  */
-function extractParametersFromDescription(desc1, desc2, mainBomNum) {
-    const value1 = extractValueFromDescription(desc1);
-    const value2 = extractValueFromDescription(desc2);
+// Coils and ferrite beads (as BOM Compare's results-params.js). Their value is an inductance
+// (coil) or an impedance (bead); voltage and power do not apply to them, nor the tolerance to a
+// bead: those indicators show "not applicable" instead of grey "missing".
+// A coil word wins over "ferrite": "Inductor Power Shielded ... Ferrite" is a coil, not a bead.
+function inductiveKind(...descriptions) {
+    const t = descriptions.map(d => d || '').join(' ').toUpperCase();
+    if (/(?<![A-Z0-9])(SPOEL|SPOELEN|IND|INDUCTORS?|COILS?|CHOKES?)(?![A-Z0-9])/.test(t)) return 'inductor';
+    if (/(?<![A-Z0-9])(FERRITES?|FERRIET|BEADS?)(?![A-Z0-9])/.test(t)) return 'bead';
+    return null;
+}
+
+const NOT_APPLICABLE = {
+    inductor: ['voltage', 'power'],
+    bead: ['tolerance', 'voltage', 'power'],
+};
+
+// Inductance: 22uH, 4.3 nH, 2.2 µH (also the broken "�H" of some exports) -> "4.3nH", "2.2uH"
+function extractInductanceValue(text) {
+    const m = (text || '').match(/(?:^|[\s,;(])(\d+(?:[.,]\d+)?)\s*([nuµ�m])H\b/i);
+    if (!m) return null;
+    const unit = { n: 'nH', u: 'uH', 'µ': 'uH', '�': 'uH', m: 'mH' }[m[2].toLowerCase()] || 'uH';
+    return m[1].replace(',', '.') + unit;
+}
+
+/**
+ * Kind of a coil-like line. The server's group of the customer line (row_types) decides:
+ * a resistor or capacitor line is never read as a coil because of its ERP match's text.
+ */
+function lineKind(desc1, desc2, groupHint) {
+    if (groupHint === 'resistor' || groupHint === 'capacitor') return null;
+    if (groupHint === 'inductor') return inductiveKind(desc1) || inductiveKind(desc2) || 'inductor';
+    return inductiveKind(desc1, desc2);
+}
+
+function extractParametersFromDescription(desc1, desc2, mainBomNum, groupHint) {
+    const kind = lineKind(desc1, desc2, groupHint);
+    const valueOf = kind === 'inductor' ? extractInductanceValue : extractValueFromDescription;
+    const value1 = valueOf(desc1);
+    const value2 = valueOf(desc2);
     const tolerance1 = extractToleranceFromDescription(desc1);
     const tolerance2 = extractToleranceFromDescription(desc2);
     const voltage1 = extractVoltageFromDescription(desc1);
@@ -306,7 +347,8 @@ function extractParametersFromDescription(desc1, desc2, mainBomNum) {
     const mainPackage = mainBomNum === 1 ? package1 : package2;
     const otherPackage = mainBomNum === 1 ? package2 : package1;
 
-    return {
+    const params = {
+        kind,
         value1, value2,
         tolerance1, tolerance2,
         voltage1, voltage2,
@@ -318,6 +360,11 @@ function extractParametersFromDescription(desc1, desc2, mainBomNum) {
         powerStatus: compareRegexPower(mainPower, otherPower),
         packageStatus: compareRegexPackage(mainPackage, otherPackage)
     };
+    // Not applicable to this kind of part, unless a description does state it
+    (NOT_APPLICABLE[kind] || []).forEach(key => {
+        if (!params[`${key}1`] && !params[`${key}2`]) params[`${key}Status`] = 'na';
+    });
+    return params;
 }
 
 // ============================================================
@@ -401,6 +448,13 @@ function normalizeValue(value) {
         else if (unit === 'pf') nfValue = num / 1000;
         else nfValue = num / 1e6;
         return parseFloat(nfValue.toPrecision(10)).toString() + 'nf';
+    }
+
+    // Inductance - normalize to nanohenry (4.3nH, 2.2uH = 2200nH, 1mH)
+    const indMatch = val.match(/^([\d.]+)\s*(nh|uh|mh)$/i);
+    if (indMatch) {
+        const factor = { nh: 1, uh: 1000, mh: 1e6 }[indMatch[2].toLowerCase()];
+        return parseFloat((parseFloat(indMatch[1]) * factor).toPrecision(10)).toString() + 'nh';
     }
 
     // Resistor R notation
@@ -550,7 +604,8 @@ function buildMatcherParamCells(rowIndex) {
     const cleanErpDesc = erpDesc.replace(/<[^>]*>/g, '');
 
     // Extract and compare parameters (customer BOM = main = 1)
-    const params = extractParametersFromDescription(cleanCustomerDesc, cleanErpDesc, 1);
+    const groupHint = bomData.row_types ? bomData.row_types[rowIndex] : undefined;
+    const params = extractParametersFromDescription(cleanCustomerDesc, cleanErpDesc, 1, groupHint);
 
     const hasAnyParam = params.value1 || params.value2 ||
         params.tolerance1 || params.tolerance2 ||
@@ -560,11 +615,14 @@ function buildMatcherParamCells(rowIndex) {
 
     const isCapacitor = (params.value1 && /[pnuµ]F/i.test(params.value1)) ||
         (params.value2 && /[pnuµ]F/i.test(params.value2));
-    const valueSymbol = isCapacitor ? '-||-' : 'Ω';
+    const valueSymbol = params.kind === 'inductor' ? 'L' : (isCapacitor ? '-||-' : 'Ω');
 
     const fmt = (bom, erp) => escapeHtml(`BOM: ${bom || '—'} | ERP: ${erp || '—'}`);
-    const ind = (status, tip, symbol) =>
-        `<span class="param-indicator ${getIndicatorClass(status)}" data-tip="${tip}">${symbol}</span>`;
+    // A parameter that does not apply to a coil or bead: a dash, not a grey "missing"
+    const naTip = `Not used for ${params.kind === 'bead' ? 'ferrite beads' : 'coils'}`;
+    const ind = (status, tip, symbol) => status === 'na'
+        ? `<span class="param-indicator param-na" data-tip="${naTip}">–</span>`
+        : `<span class="param-indicator ${getIndicatorClass(status)}" data-tip="${tip}">${symbol}</span>`;
 
     return `<td class="pc g-start">${ind(params.valueStatus, fmt(params.value1, params.value2), valueSymbol)}</td>` +
         `<td class="pc">${ind(params.toleranceStatus, fmt(params.tolerance1, params.tolerance2), '%')}</td>` +
