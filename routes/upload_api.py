@@ -12,12 +12,12 @@ from services.file_service import allowed_file, read_file, get_sheet_names, get_
 from services.session_service import (
     get_session_id, save_bom_data, load_bom_data,
     save_mapping_history, load_mapping_history,
-    load_matches, load_mpnfree, load_selections,
+    load_matches, save_matches, load_mpnfree, load_selections,
     save_to_history, has_process_data, clear_process_data
 )
 from services.klant_cache_service import get_all_klanten
 from services.category_detect_service import detect_category, component_group, refdes_number
-from services.match_service import _get_mapped_value
+from services.match_service import _get_mapped_value, keep_selected_articles
 
 logger = logging.getLogger(__name__)
 
@@ -195,6 +195,16 @@ def get_bom_data():
         row_types.append(component_group(detect_category(_get_mapped_value(row, mapping, 'Description'), refdes)))
         row_refdes_num.append(refdes_number(refdes))
 
+    # Repair sessions where an article picked by hand lost its details (Find IPN replaced the
+    # row's match before keep_selected_articles existed): the row showed Matched but stayed empty
+    matches = load_matches() or {}
+    selections = load_selections() or {}
+    try:
+        if keep_selected_articles(matches, selections):
+            save_matches(matches)
+    except Exception as e:
+        logger.warning(f"Could not restore the selected articles: {e}")
+
     return jsonify({
         'headers': bom_data.get('headers', []),
         'rows': rows,
@@ -204,9 +214,9 @@ def get_bom_data():
         'total_rows': len(bom_data.get('rows', [])),
         'name': bom_data.get('name', ''),
         'klant_nr': bom_data.get('klant_nr', ''),
-        'matches': load_matches() or {},
+        'matches': matches,
         'mpnfree': load_mpnfree() or {},
-        'selections': load_selections() or {},
+        'selections': selections,
     })
 
 

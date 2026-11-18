@@ -11,7 +11,7 @@ from services.session_service import (
     save_selections, load_selections,
     save_to_history
 )
-from services.match_service import find_ipn_batch, find_ipn_single, filter_customer_specific
+from services.match_service import find_ipn_batch, find_ipn_single, filter_customer_specific, keep_selected_articles
 from services.previous_bom_match_service import (
     match_against_previous_bom, match_previous_single,
 )
@@ -74,6 +74,8 @@ def find_ipn():
         matches_dict = {}
         for r in results:
             matches_dict[str(r['row_index'])] = r
+        # Articles picked by hand keep their details (the results are changed in place)
+        keep_selected_articles(matches_dict, load_selections() or {})
 
         save_matches(matches_dict)
 
@@ -141,7 +143,8 @@ def find_ipn_single_route():
 
         logger.info(f"Row {row_index} result: {result['search_method']}, {result['confidence']}, {len(result['suggestions'])} suggestions")
 
-        # Update stored matches
+        # Update stored matches; an article picked by hand keeps its details
+        keep_selected_articles({str(row_index): result}, {str(row_index): sel})
         matches = load_matches() or {}
         matches[str(row_index)] = result
         save_matches(matches)
@@ -195,6 +198,8 @@ def manual_search():
         # Update stored matches (not for a preview: the row panel only shows the results
         # and stores a match once the user picks one, through /match/set-row)
         if row_index is not None and not data.get('preview'):
+            sel = (load_selections() or {}).get(str(row_index), {})
+            keep_selected_articles({str(row_index): result}, {str(row_index): sel})
             matches = load_matches() or {}
             matches[str(row_index)] = result
             save_matches(matches)

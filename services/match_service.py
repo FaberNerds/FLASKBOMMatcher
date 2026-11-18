@@ -480,3 +480,43 @@ def find_ipn_single(
         'auto_selected': None,
         'confidence': 'none'
     }
+
+
+def keep_selected_articles(matches: Dict[str, Any], selections: Dict[str, Any]) -> List[str]:
+    """Make sure every article picked by hand is among its row's suggestions.
+
+    The match page and the export look up a hand-picked FaberNr in the row's suggestions. Find
+    IPN replaces a row's match but keeps the selection, so an article picked from a manual
+    search would lose its details: the row showed "Matched" but stayed empty. The missing
+    articles are fetched in one ERP query and put first in their row's suggestions.
+    Changes ``matches`` in place; returns the row keys that changed.
+    """
+    missing: Dict[str, str] = {}
+    for idx, sel in (selections or {}).items():
+        fabernr = str((sel or {}).get('fabernr') or '').strip()
+        if not fabernr:
+            continue
+        match = matches.get(idx)
+        suggestions = (match or {}).get('suggestions') or []
+        if any(str(s.get('FaberNr', '')).strip() == fabernr for s in suggestions):
+            continue
+        missing[idx] = fabernr
+    if not missing:
+        return []
+
+    found = {str(r.get('FaberNr', '')).strip(): r
+             for r in search_service.search_by_item_codes(sorted(set(missing.values())))}
+    changed = []
+    for idx, fabernr in missing.items():
+        item = found.get(fabernr)
+        if not item:
+            logger.warning(f"Row {idx}: selected FaberNr {fabernr} not found in the ERP")
+            continue
+        match = matches.get(idx) or {
+            'row_index': int(idx), 'search_method': 'manual', 'suggestions': [],
+            'auto_selected': None, 'confidence': 'none',
+        }
+        match['suggestions'] = [dict(item)] + list(match.get('suggestions') or [])
+        matches[idx] = match
+        changed.append(idx)
+    return changed
