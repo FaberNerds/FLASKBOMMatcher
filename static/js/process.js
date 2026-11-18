@@ -483,8 +483,10 @@ function statusBadge(state) {
         parts.push('Selected by hand');
     } else if (state.match) {
         parts.push(SEARCH_METHOD_LABELS[state.match.search_method] || state.match.search_method || 'No search');
-        const score = state.displayItem ? state.displayItem._similarity_score : undefined;
+        const shown = state.displayItem || state.suggestion;
+        const score = shown ? shown._similarity_score : undefined;
         if (score !== undefined && score !== null) parts.push(`${Math.round(score)}%`);
+        if (!state.displayItem && state.suggestion) parts.push('suggestion only, click the line to see it');
     }
     const tip = escapeHtml(parts.join(' · '));
     switch (state.status) {
@@ -533,7 +535,9 @@ function getRowState(rowIndex) {
         searchMethod = match.search_method || '';
     }
 
-    // Which item to display: manually selected suggestion, auto_selected, or display_suggestion
+    // The assigned article shown in the row: the one picked by hand, or the one Find IPN assigned.
+    // A suggestion (display_suggestion, e.g. another MPN) is not linked: the row stays empty and
+    // the suggestion only shows in the row panel, with Accept suggestion.
     let displayItem = null;
     if (sel.fabernr && match && match.suggestions) {
         displayItem = match.suggestions.find(s => s.FaberNr === sel.fabernr) || null;
@@ -541,9 +545,7 @@ function getRowState(rowIndex) {
     if (!displayItem && match && match.auto_selected) {
         displayItem = match.auto_selected;
     }
-    if (!displayItem && match && match.display_suggestion) {
-        displayItem = match.display_suggestion;
-    }
+    const suggestion = (!fabernr && match && match.display_suggestion) || null;
 
     let status = '';
     if (deletedRows.has(rowIndex)) {
@@ -556,7 +558,7 @@ function getRowState(rowIndex) {
         status = 'nomatch';
     }
 
-    return { match, sel, fabernr, confidence, searchMethod, displayItem, status };
+    return { match, sel, fabernr, confidence, searchMethod, displayItem, suggestion, status };
 }
 
 // ========================================================================
@@ -623,7 +625,7 @@ function renderTableHead(mappedCols, hasMpnfree) {
 /** Customer BOM cells of one line (plus the MPNfree dropdown at the end when that mode is on). */
 function renderCustomerCells(rowIndex, row, mappedCols, hasMpnfree, state) {
     let html = '';
-    const hlItem = state.match && (state.match.auto_selected || state.match.display_suggestion);
+    const hlItem = state.displayItem;
     for (const col of mappedCols) {
         const cellValue = getMappedValue(row, col.actual);
         if (col.std === 'Description') {
@@ -667,11 +669,11 @@ function renderErpCells(rowIndex, row, state) {
     const mapping = bomData.column_mapping || {};
     let html = '';
 
-    // FaberNr: assigned (steel, with the previous-BOM check) or only a suggestion (italic, muted)
-    if (state.fabernr) {
-        html += `<td class="g-start" data-copy="${escapeHtml(state.fabernr)}"><span class="fnr">${escapeHtml(state.fabernr)}</span>${renderPreviousBomCheck(state.fabernr)}</td>`;
-    } else if (!isBlank(auto.FaberNr)) {
-        html += `<td class="g-start" data-copy="${escapeHtml(auto.FaberNr)}" title="Suggestion, not assigned"><span class="sugg">${escapeHtml(auto.FaberNr)}</span><span class="sugg-note">(suggestion)</span></td>`;
+    // FaberNr: the assigned article (steel, with the previous-BOM check). Suggestions never show
+    // here, only in the row panel.
+    const nr = state.fabernr || auto.FaberNr;
+    if (!isBlank(nr)) {
+        html += `<td class="g-start" data-copy="${escapeHtml(nr)}"><span class="fnr">${escapeHtml(nr)}</span>${renderPreviousBomCheck(nr)}</td>`;
     } else {
         html += `<td class="g-start">${NIL}</td>`;
     }
@@ -1150,9 +1152,9 @@ function notifyWithUndo(message, rowIndex, snap) {
     });
 }
 
-/** The ERP article on the line, or null when it has none (or its match was removed). */
+/** The ERP article of the line for the row panel: the assigned one or else the suggestion. */
 function currentItem(state) {
-    return state.status === 'deleted' ? null : state.displayItem;
+    return state.status === 'deleted' ? null : (state.displayItem || state.suggestion);
 }
 
 /** Remove the ERP match of a line. The candidates stay, so another one can still be picked. */
