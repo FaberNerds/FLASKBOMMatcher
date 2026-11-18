@@ -2300,3 +2300,72 @@ body {
     border-radius: 50%;
     animation: spin 1s linear infinite;
 }
+
+/* ========================================
+   PAGE BACKGROUND: BOM Matcher only
+   Proposal bg-13 "Schuivende capsules": a white page with two wide soft pills at the
+   top right, steel and gold, sliding into each other like two BOMs being merged.
+   Fixed to the window, half behind the floating masthead, so the glass blurs them.
+   The shared faber.css (flat #e8ecf2) stays identical in every app; this overrides it
+   for this app alone (house style README, "Kleur").
+   ======================================== */
+
+.fx-page {
+    background: var(--surface);
+}
+
+.fx-page::before,
+.fx-page::after {
+    content: "";
+    position: fixed;
+    z-index: -1;
+    pointer-events: none;
+    height: 200px;
+    border-radius: var(--radius-pill);
+}
+
+/* Steel pill: behind the right half of the masthead */
+.fx-page::before {
+    top: -40px;
+    right: 180px;
+    width: 520px;
+    background: #dfe6f2;
+}
+
+/* Gold pill: enters from the right edge 110px lower and overlaps the steel pill */
+.fx-page::after {
+    top: 70px;
+    right: -160px;
+    width: 560px;
+    background: #f3ebdf;
+    mix-blend-mode: multiply;
+}
+
+@media (max-width: 900px) {
+    .fx-page::before,
+    .fx-page::after {
+        height: 120px;
+    }
+
+    .fx-page::before {
+        right: 100px;
+        width: 300px;
+    }
+
+    .fx-page::after {
+        top: 40px;
+        width: 340px;
+    }
+}
+
+@media print {
+    .fx-page::before,
+    .fx-page::after {
+        display: none;
+    }
+
+    body,
+    .fx-page {
+        background: #ffffff;
+    }
+}

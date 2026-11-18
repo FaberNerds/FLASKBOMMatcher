@@ -2,126 +2,59 @@
 
 {% block title %}BOM Matcher - Process{% endblock %}
 
+{% block extra_styles %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/process-page.css') }}">
+{% endblock %}
+
 {% block content %}
-<!-- Toolbar -->
-<div class="toolbar process-toolbar">
-    <a href="/?back=1" class="btn btn-ghost btn-small toolbar-back" title="Back to upload and column mapping">{{ icon('back') }} Back</a>
-    <h1 class="toolbar-title">
-        BOM: <span id="bomName"></span>
-        <span id="bomStats" class="toolbar-meta fx-mono"></span>
-    </h1>
-    <div class="toolbar-actions">
-        <button class="btn" id="selectMpnfreeBtn" onclick="selectMpnfree()">Select MPNfree</button>
-        <button class="btn btn-primary" onclick="findIpn()">{{ icon('search') }} Find IPN</button>
-        <button class="btn btn-outline" id="copyModeBtn" onclick="toggleCopyMode()">Copy: OFF</button>
-        <button class="btn btn-outline" id="deleteModeBtn" onclick="toggleDeleteMode()">Delete: OFF</button>
-        <button class="btn" onclick="exportBom()">{{ icon('export') }} Export</button>
-        <div class="zoom-control" role="group" aria-label="Zoom">
-            <button class="btn btn-small zoom-btn" onclick="adjustZoom(-5)" title="Zoom out" aria-label="Zoom out">{{ icon('minus') }}</button>
-            <span id="zoomLevel" class="zoom-level fx-mono" onclick="resetZoom()" title="Click to reset">100%</span>
-            <button class="btn btn-small zoom-btn" onclick="adjustZoom(5)" title="Zoom in" aria-label="Zoom in">{{ icon('plus') }}</button>
+<div class="match-page">
+    <!-- Header: Back, file name and customer left; the five actions right, on one line -->
+    <section class="match-head">
+        <div class="match-title">
+            <a href="/?back=1" class="btn btn-ghost match-back" title="Back to upload and column mapping">{{ icon('back') }}Back</a>
+            <span class="match-vsep" aria-hidden="true"></span>
+            <h1 class="fx-heading" id="bomName"></h1>
+            <span class="fx-badge fx-badge-gold fx-badge-pill klant-pill" id="klantPill" hidden></span>
         </div>
-    </div>
-</div>
+        <div class="match-actions" role="toolbar" aria-label="Match actions">
+            <button class="btn" type="button" id="selectMpnfreeBtn" onclick="selectMpnfree()">{{ icon('check') }}Select MPNfree</button>
+            <button class="btn btn-primary" type="button" id="findIpnBtn" onclick="findIpn()">{{ icon('search') }}Find IPN</button>
+            <span class="match-vsep" aria-hidden="true"></span>
+            <button class="btn btn-toggle" type="button" id="copyModeBtn" aria-pressed="false" onclick="toggleCopyMode()">{{ icon('copy') }}<span class="tlabel">Copy: OFF</span></button>
+            <button class="btn btn-toggle" type="button" id="deleteModeBtn" aria-pressed="false" onclick="toggleDeleteMode()">{{ icon('trash') }}<span class="tlabel">Delete: OFF</span></button>
+            <span class="match-vsep" aria-hidden="true"></span>
+            <button class="btn" type="button" id="exportBtn" onclick="exportBom()">{{ icon('export') }}Export</button>
+        </div>
+    </section>
 
-<!-- Summary Badges -->
-<div id="summaryBadges" style="display: none;">
-    <div class="fx-stats summary-stats">
-        <div class="fx-stat fx-glass fx-tone-success">
-            <div class="fx-stat-icon">{{ icon('check') }}</div>
-            <div class="fx-stat-text">
-                <span class="fx-stat-label">Matched</span>
-                <span class="fx-stat-value" id="matchedCount">0</span>
+    <!-- Slim glass filter bar: search, status chips, mode hint -->
+    <section class="match-filter fx-glass" aria-label="Search and filter">
+        <label class="match-search">
+            {{ icon('search') }}
+            <input type="search" id="searchInput" placeholder="Search description, MPN, FaberNr or refdes"
+                   oninput="filterTable()" aria-label="Search lines" autocomplete="off">
+        </label>
+        <span class="match-vsep" aria-hidden="true"></span>
+        <div class="match-fgroup">
+            <span class="match-fgroup-label" id="statusLabel">Status</span>
+            <div class="fx-chips" role="group" aria-labelledby="statusLabel" id="statusChips">
+                <button class="fx-chip" type="button" aria-pressed="true" data-filter="all">All</button>
+                <button class="fx-chip" type="button" aria-pressed="false" data-filter="matched">Matched</button>
+                <button class="fx-chip" type="button" aria-pressed="false" data-filter="partial">Partial</button>
+                <button class="fx-chip" type="button" aria-pressed="false" data-filter="nomatch">No match</button>
             </div>
         </div>
-        <div class="fx-stat fx-glass fx-tone-warning">
-            <div class="fx-stat-icon">{{ icon('warning') }}</div>
-            <div class="fx-stat-text">
-                <span class="fx-stat-label">Partial</span>
-                <span class="fx-stat-value" id="partialCount">0</span>
-            </div>
-        </div>
-        <div class="fx-stat fx-glass fx-tone-danger">
-            <div class="fx-stat-icon">{{ icon('close') }}</div>
-            <div class="fx-stat-text">
-                <span class="fx-stat-label">No match</span>
-                <span class="fx-stat-value" id="noMatchCount">0</span>
-            </div>
-        </div>
-        <div class="fx-stat fx-glass fx-tone-steel" id="paramBadge" style="display: none;">
-            <div class="fx-stat-icon">{{ icon('sliders') }}</div>
-            <div class="fx-stat-text">
-                <span class="fx-stat-label">Parameterized</span>
-                <span class="fx-stat-value" id="paramCount">0</span>
-            </div>
-        </div>
+        <span class="mode-hint" id="modeHint" role="status" hidden><span class="mark" aria-hidden="true"></span><span id="modeText"></span></span>
+    </section>
+
+    <!-- One white sheet: customer BOM, ERP match and parameters in one table -->
+    <div class="match-sheet" id="matchSheet">
+        <table class="match-table" id="matchTable">
+            <thead id="matchTableHead"></thead>
+            <tbody id="matchTableBody"></tbody>
+        </table>
     </div>
 </div>
-
-<!-- Search/Filter Bar -->
-<div id="filterBar" style="display: none;">
-    <div class="filter-bar">
-        <input type="search" class="form-input filter-search" id="searchInput" placeholder="Search..."
-               oninput="filterTable()" aria-label="Search rows">
-        <select class="form-select filter-status" id="statusFilter" onchange="filterTable()" aria-label="Status">
-            <option value="all">All status</option>
-            <option value="matched">Matched</option>
-            <option value="partial">Partial</option>
-            <option value="nomatch">No match</option>
-        </select>
-    </div>
-</div>
-
-<!-- Split Panel Layout -->
-<div class="split-panel" id="splitPanel">
-    <!-- Left Panel: Customer BOM -->
-    <div class="split-panel-left">
-        <div class="split-panel-header">Customer BOM</div>
-        <div class="split-panel-scroll" id="leftScroll">
-            <table class="data-table" id="leftTable">
-                <thead id="leftTableHead"></thead>
-                <tbody id="leftTableBody"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Divider -->
-    <div class="split-panel-divider"></div>
-
-    <!-- Right Panel: ERP Matches -->
-    <div class="split-panel-right">
-        <div class="split-panel-header">ERP Matches</div>
-        <div class="split-panel-scroll" id="rightScroll">
-            <table class="data-table" id="rightTable">
-                <thead id="rightTableHead"></thead>
-                <tbody id="rightTableBody"></tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Divider -->
-    <div class="split-panel-divider"></div>
-
-    <!-- Params Panel -->
-    <div class="split-panel-params" id="paramsPanel">
-        <div class="split-panel-header">Params <span class="params-stats fx-mono" id="paramsStats">0</span></div>
-        <div class="split-panel-scroll" id="paramsScroll">
-            <table class="params-table" id="paramsTable">
-                <thead>
-                    <tr>
-                        <th title="Value">Ω/-||-</th>
-                        <th title="Tolerance">%</th>
-                        <th title="Voltage">V</th>
-                        <th title="Power">P</th>
-                        <th title="Package" aria-label="Package">{{ icon('package') }}</th>
-                    </tr>
-                </thead>
-                <tbody id="paramsTableBody"></tbody>
-            </table>
-        </div>
-    </div>
-</div>
-
 {% endblock %}
 
 {% block extra_scripts %}
