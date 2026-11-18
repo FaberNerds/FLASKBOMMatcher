@@ -547,14 +547,16 @@ function getRowState(rowIndex) {
     }
     const suggestion = (!fabernr && match && match.display_suggestion) || null;
 
+    // Matched / Partial only when a part is linked; a suggestion alone is No match (it shows in
+    // the row panel only)
     let status = '';
     if (deletedRows.has(rowIndex)) {
         status = 'deleted';
-    } else if (confidence === 'high') {
+    } else if (fabernr && confidence === 'high') {
         status = 'matched';
-    } else if (confidence === 'medium' || confidence === 'low') {
+    } else if (fabernr && (confidence === 'medium' || confidence === 'low')) {
         status = 'partial';
-    } else if (match && match.confidence === 'none') {
+    } else if (match) {
         status = 'nomatch';
     }
 
@@ -1683,8 +1685,10 @@ async function findIpn() {
             for (const r of data.results) {
                 matchResults[String(r.row_index)] = r;
             }
-            // A new match run: lines are no longer marked as removed
+            // Find IPN starts over: no line is marked as removed, the parts picked by hand
+            // are forgotten (the server cleared them; the MPNfree choices stay)
             deletedRows.clear();
+            if (data.selections) selections = data.selections;
         }
         renderTables();
         restoreScroll(saved);
