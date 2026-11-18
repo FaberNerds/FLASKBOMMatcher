@@ -593,9 +593,6 @@ function buildMatcherParamCells(rowIndex) {
     if (!displayItem && match && match.auto_selected) {
         displayItem = match.auto_selected;
     }
-    if (!displayItem && match && match.display_suggestion) {
-        displayItem = match.display_suggestion;
-    }
     if (!displayItem) return _paramNaCells(match ? 'No ERP match' : 'Not matched yet');
     const erpDesc = String(displayItem.Omschrijving || '');
 
