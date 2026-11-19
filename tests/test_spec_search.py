@@ -24,6 +24,11 @@ from routes import match_api
     ({'value': '1M'}, {'value': '1000000'}),
     ({'value': '330mΩ'}, {'value': '0.33'}),
     ({'value': '20Ω'}, {'value': '20'}),
+    # A jumper is indexed as 0R
+    ({'value': '0'}, {'value': '0R'}),
+    ({'value': '0E'}, {'value': '0R'}),
+    ({'value': '0Ω'}, {'value': '0R'}),
+    ({'value': '0R47'}, {'value': '0.47'}),
     ({'tolerance': '1'}, {'tolerance': '1%'}),
     ({'tolerance': '0,1%'}, {'tolerance': '0.1%'}),
     ({'power': '62.5mW'}, {'power': '0.0625W'}),

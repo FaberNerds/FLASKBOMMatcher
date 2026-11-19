@@ -1302,6 +1302,9 @@ def _spec_value(text: str) -> Optional[str]:
     s = s.rstrip('Ωω')
     if not re.match(r'^\d', s):
         return None
+    # A jumper (0, 0R, 0E, 0Ω) is indexed as 0R
+    if re.match(r'^0+(?:[.,]0+)?[RrEe]?$', s):
+        return "0R"
     ohms = normalize_resistance(s)
     return _plain(ohms) if ohms is not None and ohms > 0 else None
 
