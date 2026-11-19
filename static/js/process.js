@@ -1207,8 +1207,84 @@ function panelIcon(name) {
         `stroke-linejoin="round" aria-hidden="true">${PANEL_ICON_PATHS[name]}</svg>`;
 }
 
-const SEARCH_MODES = [['mpn', 'MPN'], ['ipn', 'IPN'], ['description', 'Description']];
-const SEARCH_MODE_LABELS = { mpn: 'MPN', ipn: 'IPN', description: 'Description' };
+const SEARCH_MODES = [['mpn', 'MPN'], ['ipn', 'IPN'], ['description', 'Description'], ['spec', 'Spec']];
+const SEARCH_MODE_LABELS = { mpn: 'MPN', ipn: 'IPN', description: 'Description', spec: 'Spec' };
+
+// Spec search: resistors and capacitors by their parameters (server: /api/match/spec-search,
+// the same index and rules as MPNfree matching). Click a field's name to leave it out.
+const SPEC_FIELDS = {
+    RES: [
+        { k: 'value', label: 'Value', ph: '4k7' },
+        { k: 'tolerance', label: 'Tolerance', hint: 'lower or equal ok', ph: '1%' },
+        { k: 'power', label: 'Power', hint: 'higher or equal ok', ph: '1/16W' },
+        { k: 'voltage', label: 'Voltage', hint: 'higher or equal ok', ph: '50V', off: true },
+        { k: 'package', label: 'Package', ph: '0402' },
+    ],
+    CAP: [
+        { k: 'capacitance', label: 'Capacitance', ph: '100nF' },
+        { k: 'dielectric', label: 'Dielectric', hint: 'better or equal ok', ph: 'X7R' },
+        { k: 'tolerance', label: 'Tolerance', hint: 'lower or equal ok', ph: '10%' },
+        { k: 'voltage', label: 'Voltage', hint: 'higher or equal ok', ph: '50V' },
+        { k: 'package', label: 'Package', ph: '0603' },
+    ],
+};
+const SPEC_KIND_TITLES = { RES: 'Resistor', CAP: 'Capacitor' };
+const SPEC_DIELECTRIC = /\b(C0G|COG|NP0|NPO|U2J|X8R|X8L|X7R|X7S|X6S|X5R|Y5V|Z5U)\b/i;
+
+/** The line's own values per Spec field, read from the customer description (as the A | B table). */
+function specBomValues(rowIndex, kind) {
+    const row = (bomData.rows || [])[rowIndex] || {};
+    const desc = getMappedValue(row, (bomData.column_mapping || {}).Description).replace(/<[^>]*>/g, '');
+    const tol = extractToleranceFromDescription(desc);
+    const pct = tol && /%$/.test(tol) ? tol : '';
+    const pkg = extractPackageFromDescription(desc) || '';
+    if (kind === 'CAP') {
+        const d = desc.match(SPEC_DIELECTRIC);
+        return {
+            capacitance: extractCapacitorValue(desc) || '', dielectric: d ? d[1].toUpperCase() : '',
+            tolerance: pct, voltage: extractVoltageFromDescription(desc) || '', package: pkg,
+        };
+    }
+    return {
+        value: extractResistorValue(desc) || '', tolerance: pct, power: extractPowerFromDescription(desc) || '',
+        voltage: extractVoltageFromDescription(desc) || '', package: pkg,
+    };
+}
+
+/** Fields left out of the search until their name is clicked (resistor voltage: few ERP descriptions state it). */
+function specDefaultOff(kind) {
+    return SPEC_FIELDS[kind].filter(fd => fd.off).map(fd => fd.k);
+}
+
+/** Spec fields of the open panel; the kind follows the line's group, filled from the BOM. */
+function specState(rowIndex) {
+    if (!panel.spec) {
+        const kind = rowGroup(rowIndex) === 'capacitor' ? 'CAP' : 'RES';
+        panel.spec = { kind, f: specBomValues(rowIndex, kind), bad: [], off: specDefaultOff(kind) };
+    }
+    return panel.spec;
+}
+
+/** Same value as the BOM's, ignoring case, spaces and a decimal comma. */
+function specSameAsBom(a, b) {
+    const norm = v => String(v || '').replace(/\s+/g, '').replace(',', '.').replace(/µ/g, 'u').toUpperCase();
+    return !!norm(a) && norm(a) === norm(b);
+}
+
+/** The fields to search on: filled in and not switched off, as { name: text }. */
+function specParams(spec) {
+    const params = {};
+    SPEC_FIELDS[spec.kind].forEach(fd => {
+        const v = String(spec.f[fd.k] || '').trim();
+        if (v && !spec.off.includes(fd.k)) params[fd.k] = v;
+    });
+    return params;
+}
+
+/** One line for the results head: RES 20k · 1% · 1/16W · 0402 */
+function specSummary(spec) {
+    return `${spec.kind} ${Object.values(specParams(spec)).join(' · ')}`;
+}
 
 function rowEl(rowIndex) {
     return document.querySelector(`#matchTableBody tr[data-row="${rowIndex}"]`);
@@ -1257,7 +1333,7 @@ function openPanel(rowIndex) {
     selectRow(rowIndex);
     panel = {
         row: rowIndex, view: 'cands', results: [], shown: [],
-        q: '', qmode: '', busy: false, failed: false, smode: null, input: null,
+        q: '', qmode: '', busy: false, failed: false, error: '', smode: null, input: null, spec: null,
     };
     mountPanel();
     fitMatchTable();
@@ -1306,7 +1382,9 @@ function renderPanel() {
     x.querySelector('.xcur').innerHTML = panelCurrentHtml(panel.row);
     x.querySelector('.xhead').innerHTML = panelHeadHtml(panel.row);
     x.querySelector('.xmini-scroll').innerHTML = panelListHtml(panel.row);
-    x.querySelector('.xsearch').innerHTML = panelSearchHtml(panel.row);
+    const search = x.querySelector('.xsearch');
+    search.innerHTML = panelSearchHtml(panel.row);
+    search.classList.toggle('is-spec', panel.smode === 'spec');
 }
 
 // ------------------------------------------------------------------------
@@ -1502,24 +1580,89 @@ function klantCellHtml(item) {
 // (as in the main table: value, tolerance, voltage, power, package)
 // Compact enough for a 1080p screen at 125-150% scaling: mounting and a status other than
 // Actief sit next to the FaberNr, MPN and manufacturer share one column, the dots have symbols.
-const PANEL_LIST_HEAD = '<thead><tr><th>FaberNr</th><th>Omschrijving</th><th>MPN · Manufacturer</th>' +
-    '<th class="fx-num">Kostprijs</th><th class="fx-num">Voorraad</th><th>Klant</th>' +
-    '<th class="xparam" title="Value (Ω resistor, -||- capacitor, L coil)">Val</th><th class="xparam" title="Tolerance">%</th>' +
-    '<th class="xparam" title="Voltage">V</th><th class="xparam" title="Power">P</th><th class="xparam" title="Package">Pkg</th>' +
-    '<th class="xact"><span class="xsr">Action</span></th></tr></thead>';
+// Click a column head to sort: ascending, descending, then back to Find IPN's order.
+// The sort stays while the page is open, for every line's panel.
+const PANEL_LIST_COLUMNS = [
+    { key: 'nr', label: 'FaberNr' },
+    { key: 'desc', label: 'Omschrijving' },
+    { key: 'mpn', label: 'MPN · Manufacturer' },
+    { key: 'price', label: 'Kostprijs', cls: 'fx-num' },
+    { key: 'stock', label: 'Voorraad', cls: 'fx-num' },
+    { key: 'klant', label: 'Klant' },
+    { key: 'value', label: 'Val', cls: 'xparam', title: 'Value (Ω resistor, -||- capacitor, L coil)' },
+    { key: 'tolerance', label: '%', cls: 'xparam', title: 'Tolerance' },
+    { key: 'voltage', label: 'V', cls: 'xparam', title: 'Voltage' },
+    { key: 'power', label: 'P', cls: 'xparam', title: 'Power' },
+    { key: 'package', label: 'Pkg', cls: 'xparam', title: 'Package' },
+];
 const PANEL_LIST_COLS = 12;
+let panelSort = { key: null, dir: 1 };
+
+function panelListHead() {
+    const ths = PANEL_LIST_COLUMNS.map(c => {
+        const on = panelSort.key === c.key;
+        const sortAttr = on ? ` aria-sort="${panelSort.dir > 0 ? 'ascending' : 'descending'}"` : '';
+        const tip = `${c.title || c.label} · click to sort`;
+        return `<th${c.cls ? ` class="${c.cls}"` : ''}${sortAttr}><button type="button" class="xsort${on ? ' is-on' : ''}" ` +
+            `data-act="sort" data-sort="${c.key}" title="${escapeHtml(tip)}">${escapeHtml(c.label)}` +
+            `<span class="xsort-i" aria-hidden="true">${on ? (panelSort.dir > 0 ? '▲' : '▼') : ''}</span></button></th>`;
+    }).join('');
+    return `<thead><tr>${ths}<th class="xact"><span class="xsr">Action</span></th></tr></thead>`;
+}
+
+// Parameter dots sort good first: same, acceptable, not in both, different, not applicable
+const PARAM_SORT_RANK = { match: 0, acceptable: 1, missing: 2, diff: 3, na: 4 };
+
+/** The value a list sorts on; null always sorts last. */
+function panelSortValue(rowIndex, s, key) {
+    const text = v => (isBlank(v) ? null : String(v).trim().toLowerCase());
+    switch (key) {
+        case 'nr': return text(s.FaberNr);
+        case 'desc': return text(s.Omschrijving);
+        case 'mpn': return text(s.MPN) || text(s.Manufacturer);
+        case 'price': return toNumber(s.Kostprijs);
+        case 'stock': return toNumber(s.Voorraad);
+        case 'klant': {
+            const nr = String(s.KlantNr === undefined || s.KlantNr === null ? '' : s.KlantNr).trim();
+            return nr === '0' ? 'algemeen' : text(s.KlantNaam) || (nr || null);
+        }
+        default: {
+            const row = (bomData.rows || [])[rowIndex] || {};
+            const desc = getMappedValue(row, (bomData.column_mapping || {}).Description).replace(/<[^>]*>/g, '');
+            const groupHint = bomData.row_types ? bomData.row_types[rowIndex] : undefined;
+            const p = extractParametersFromDescription(desc, String(s.Omschrijving || '').replace(/<[^>]*>/g, ''), 1, groupHint);
+            const rank = PARAM_SORT_RANK[p[`${key}Status`]];
+            return rank === undefined ? null : rank;
+        }
+    }
+}
+
+/** The list in the chosen column order (a copy; Find IPN's order when no column is chosen). */
+function sortPanelList(rowIndex, list) {
+    if (!panelSort.key) return list;
+    const keyed = list.map((s, i) => ({ s, i, v: panelSortValue(rowIndex, s, panelSort.key) }));
+    keyed.sort((a, b) => {
+        if (a.v === null || b.v === null) return (a.v === null) - (b.v === null) || a.i - b.i;
+        const c = typeof a.v === 'number' ? a.v - b.v : a.v.localeCompare(b.v, 'nl', { numeric: true });
+        return c * panelSort.dir || a.i - b.i;
+    });
+    return keyed.map(x => x.s);
+}
 
 function panelListHtml(rowIndex) {
-    const message = (text) => `<table>${PANEL_LIST_HEAD}<tbody><tr class="xmsg"><td colspan="${PANEL_LIST_COLS}">${text}</td></tr></tbody></table>`;
+    const message = (text) => `<table>${panelListHead()}<tbody><tr class="xmsg"><td colspan="${PANEL_LIST_COLS}">${text}</td></tr></tbody></table>`;
     if (panel.view === 'results' && panel.busy) {
         return message(`Searching the ERP by ${escapeHtml(SEARCH_MODE_LABELS[panel.qmode] || '')} for “${escapeHtml(panel.q)}”...`);
     }
     const state = getRowState(rowIndex);
-    const list = panel.view === 'results' ? panel.results : panelCandidates(rowIndex);
+    const list = sortPanelList(rowIndex, panel.view === 'results' ? panel.results : panelCandidates(rowIndex));
     panel.shown = list;
     if (!list.length) {
         if (panel.view === 'results') {
-            return message(panel.failed ? 'The search failed. Try again.' : 'No ERP articles found. Try another MPN, IPN or description.');
+            if (panel.failed) return message(escapeHtml(panel.error || 'The search failed. Try again.'));
+            return message(panel.qmode === 'spec'
+                ? 'No ERP articles with these specs. Empty a field (tolerance, power, voltage) or check the package.'
+                : 'No ERP articles found. Try another MPN, IPN or description.');
         }
         return message('No candidates for this line. Search the ERP below by MPN, IPN or description.');
     }
@@ -1565,7 +1708,7 @@ function panelListHtml(rowIndex) {
             buildParamCellsFor(rowIndex, s) +
             `<td class="xact">${act}</td></tr>`;
     });
-    return `<table>${PANEL_LIST_HEAD}<tbody>${body}</tbody></table>`;
+    return `<table>${panelListHead()}<tbody>${body}</tbody></table>`;
 }
 
 /** The customer's value to search on: MPN, Description, or the line's current FaberNr for IPN. */
@@ -1587,6 +1730,7 @@ function panelSearchHtml(rowIndex) {
     const seg = SEARCH_MODES.map(([key, label]) =>
         `<button type="button" data-act="smode" data-mode="${key}" aria-pressed="${panel.smode === key}">${label}</button>`
     ).join('');
+    if (panel.smode === 'spec') return panelSpecHtml(rowIndex, seg);
     return '<span class="xlabel">Search ERP</span>' +
         `<div class="xseg" role="group" aria-label="Search by">${seg}</div>` +
         `<label class="xfield">${panelIcon('search')}` +
@@ -1594,9 +1738,75 @@ function panelSearchHtml(rowIndex) {
         `<button type="button" class="btn xgo" data-act="search"${panel.busy ? ' disabled' : ''}>${panelIcon('search')}${panel.busy ? 'Searching...' : 'Search'}</button>`;
 }
 
+/**
+ * Spec mode: RES | CAP and one field per parameter on a second line. A field with the BOM's
+ * value is gold; its BOM button puts the line's own value back.
+ */
+function panelSpecHtml(rowIndex, seg) {
+    const spec = specState(rowIndex);
+    const bom = specBomValues(rowIndex, spec.kind);
+    const fields = SPEC_FIELDS[spec.kind];
+    const kinds = Object.keys(SPEC_FIELDS).map(kind =>
+        `<button type="button" data-act="skind" data-kind="${kind}" aria-pressed="${spec.kind === kind}" title="${SPEC_KIND_TITLES[kind]}">${kind}</button>`
+    ).join('');
+    const anyBom = fields.some(fd => bom[fd.k]);
+    const inputs = fields.map(fd => {
+        const val = spec.f[fd.k] || '';
+        const off = spec.off.includes(fd.k);
+        const cls = 'xsf' + (off ? ' is-off' : '') + (specSameAsBom(val, bom[fd.k]) ? ' is-bom' : '') +
+            (spec.bad.includes(fd.k) ? ' is-bad' : '');
+        const bomBtn = bom[fd.k]
+            ? `<button type="button" class="xsf-bom" data-act="sbom" data-k="${fd.k}" title="From the BOM: ${escapeHtml(bom[fd.k])}">BOM</button>`
+            : '';
+        const tip = off ? `${fd.label} is left out of the search · click to use it again` : `Click to leave ${fd.label.toLowerCase()} out of the search`;
+        return `<div class="${cls}" data-k="${fd.k}"><button type="button" class="xsf-l" data-act="stoggle" data-k="${fd.k}" ` +
+            `aria-pressed="${!off}" title="${tip}"><b>${fd.label}</b>${off ? '<i>not searched</i>' : (fd.hint ? `<i>${fd.hint}</i>` : '')}</button>` +
+            `<input type="text" class="xsq" data-k="${fd.k}" value="${escapeHtml(val)}" placeholder="${fd.ph}" aria-label="${fd.label}" ` +
+            `autocomplete="off" spellcheck="false">${bomBtn}</div>`;
+    }).join('');
+    return '<div class="xsrow"><span class="xlabel">Search ERP</span>' +
+        `<div class="xseg" role="group" aria-label="Search by">${seg}</div>` +
+        `<div class="xseg" role="group" aria-label="Part type">${kinds}</div><span class="xgrow"></span>` +
+        `<button type="button" class="btn xsf-all" data-act="sallbom"${anyBom ? '' : ' disabled'} title="Fill every field with the BOM line's values">All from BOM</button>` +
+        `<button type="button" class="btn xgo" data-act="search"${panel.busy ? ' disabled' : ''}>${panelIcon('search')}${panel.busy ? 'Searching...' : 'Search'}</button></div>` +
+        `<div class="xsfields">${inputs}</div>`;
+}
+
+/** Spec search: the typed parameters against the ERP index. A preview, as the other searches. */
+async function runSpecSearch() {
+    const p = panel;
+    const spec = specState(p.row);
+    const fields = SPEC_FIELDS[spec.kind];
+    const params = specParams(spec);
+    if (!Object.keys(params).length) {
+        toast.warning('Fill in at least one field, or click a field name to use it again');
+        return;
+    }
+    spec.bad = [];
+    Object.assign(p, { view: 'results', q: specSummary(spec), qmode: 'spec', results: [], busy: true, failed: false, error: '' });
+    renderPanel();
+    try {
+        const data = await apiCall('/api/match/spec-search', {
+            method: 'POST',
+            body: JSON.stringify({ row_index: p.row, kind: spec.kind, params: params })
+        });
+        p.results = data.suggestions || [];
+    } catch (e) {
+        p.results = [];
+        p.failed = true;
+        p.error = (e && e.message) || '';
+        // "Not understood: Power" marks that field red
+        if (/^Not understood/.test(p.error)) spec.bad = fields.filter(fd => p.error.includes(fd.label)).map(fd => fd.k);
+        if (/^Voltage alone/.test(p.error)) spec.bad = ['voltage'];
+    }
+    p.busy = false;
+    if (panel === p) renderPanel();
+}
+
 /** Manual ERP search from the panel. A preview only: the line changes once a result is used. */
 async function runPanelSearch() {
     if (!panel || panel.busy) return;
+    if (panel.smode === 'spec') return runSpecSearch();
     const p = panel;
     const query = String(p.input || '').trim();
     if (!query) {
@@ -1662,11 +1872,68 @@ function onPanelClick(e) {
         }
         case 'smode': {
             panel.smode = btn.dataset.mode;
+            if (panel.smode === 'spec') {
+                renderPanel();
+                revealRow(rowIndex);
+                const first = panelRowEl().querySelector('.xsq');
+                if (first) first.focus();
+                break;
+            }
             panel.input = customerSearchValue(rowIndex, panel.smode);
             renderPanel();
+            revealRow(rowIndex);
             const input = panelRowEl().querySelector('.xq');
             input.focus();
             input.select();
+            break;
+        }
+        case 'skind': {
+            const spec = specState(rowIndex);
+            if (spec.kind !== btn.dataset.kind) {
+                spec.kind = btn.dataset.kind;
+                spec.f = specBomValues(rowIndex, spec.kind);
+                spec.bad = [];
+                spec.off = specDefaultOff(spec.kind);
+                renderPanel();
+            }
+            break;
+        }
+        case 'sbom': {
+            const spec = specState(rowIndex);
+            const k = btn.dataset.k;
+            spec.f[k] = specBomValues(rowIndex, spec.kind)[k] || '';
+            spec.bad = spec.bad.filter(b => b !== k);
+            renderPanel();
+            break;
+        }
+        case 'sort': {
+            // Ascending, descending, then Find IPN's order again
+            const key = btn.dataset.sort;
+            if (panelSort.key !== key) panelSort = { key, dir: 1 };
+            else if (panelSort.dir > 0) panelSort = { key, dir: -1 };
+            else panelSort = { key: null, dir: 1 };
+            const x = panelRowEl();
+            x.querySelector('.xmini-scroll').innerHTML = panelListHtml(rowIndex);
+            const again = x.querySelector(`.xsort[data-sort="${key}"]`);
+            if (again) again.focus();
+            break;
+        }
+        case 'stoggle': {
+            // A field's name: leave it out of the search, or use it again
+            const spec = specState(rowIndex);
+            const k = btn.dataset.k;
+            spec.off = spec.off.includes(k) ? spec.off.filter(o => o !== k) : spec.off.concat(k);
+            spec.bad = spec.bad.filter(b => b !== k);
+            renderPanel();
+            const again = panelRowEl().querySelector(`.xsf-l[data-k="${k}"]`);
+            if (again) again.focus();
+            break;
+        }
+        case 'sallbom': {
+            const spec = specState(rowIndex);
+            spec.f = specBomValues(rowIndex, spec.kind);
+            spec.bad = [];
+            renderPanel();
             break;
         }
         case 'search':
@@ -1932,11 +2199,32 @@ _matchSheet.addEventListener('click', function(e) {
 
 // Typing and Enter in the panel's search field
 _matchSheet.addEventListener('input', function(e) {
-    if (panel && e.target.classList && e.target.classList.contains('xq')) panel.input = e.target.value;
+    if (!panel || !e.target.classList) return;
+    if (e.target.classList.contains('xq')) panel.input = e.target.value;
+    if (e.target.classList.contains('xsq')) {
+        // A Spec field: keep the value, gold while it equals the BOM's, red mark gone once edited
+        const spec = specState(panel.row);
+        const k = e.target.dataset.k;
+        spec.f[k] = e.target.value;
+        spec.bad = spec.bad.filter(b => b !== k);
+        const box = e.target.closest('.xsf');
+        box.classList.toggle('is-bom', specSameAsBom(e.target.value, specBomValues(panel.row, spec.kind)[k]));
+        box.classList.remove('is-bad');
+        if (spec.off.includes(k)) {
+            // Typing in a field that was left out uses it again
+            spec.off = spec.off.filter(o => o !== k);
+            const fd = SPEC_FIELDS[spec.kind].find(f => f.k === k);
+            const name = box.querySelector('.xsf-l');
+            box.classList.remove('is-off');
+            name.setAttribute('aria-pressed', 'true');
+            name.title = `Click to leave ${fd.label.toLowerCase()} out of the search`;
+            name.innerHTML = `<b>${fd.label}</b>${fd.hint ? `<i>${fd.hint}</i>` : ''}`;
+        }
+    }
 });
 
 _matchSheet.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && e.target.classList && e.target.classList.contains('xq')) {
+    if (e.key === 'Enter' && e.target.classList && (e.target.classList.contains('xq') || e.target.classList.contains('xsq'))) {
         e.preventDefault();
         e.stopPropagation();
         runPanelSearch();
