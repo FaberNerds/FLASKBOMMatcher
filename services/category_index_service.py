@@ -942,6 +942,8 @@ class CategoryIndex:
         category: str,
         params: Dict[str, str],
         limit: int = 20,
+        require_core: bool = True,
+        strict: bool = False,
     ) -> List[Dict]:
         """Score all components in a category by weighted parameter overlap.
 
@@ -949,6 +951,11 @@ class CategoryIndex:
             category: Canonical category name (e.g. "WEERSTANDEN").
             params: Dict of parameter names to query values.
             limit: Max number of results to return.
+            require_core: False lets a query without its core value (resistance,
+                capacitance) score, for the Spec search with the value left out.
+            strict: drop a component that fails any query param it states (a lower
+                voltage, a looser tolerance...) instead of giving it a lower score.
+                A param the component does not state does not drop it.
 
         Returns:
             List of result dicts sorted by descending score.
@@ -1010,7 +1017,10 @@ class CategoryIndex:
         results = []
         for ic in item_codes:
             candidate_params = item_params.get(ic, {})
-            score, matched = self._compute_score(params, candidate_params, weights, category)
+            failed = set() if strict else None
+            score, matched = self._compute_score(params, candidate_params, weights, category, require_core, failed)
+            if failed:
+                continue
             if score > 0:
                 results.append({
                     "item_code": ic,
@@ -1032,6 +1042,8 @@ class CategoryIndex:
         candidate_params: Dict[str, str],
         weights: Dict[str, int],
         category: str = "",
+        require_core: bool = True,
+        failed: Optional[set] = None,
     ) -> Tuple[float, Dict[str, Tuple]]:
         """Compute a weighted similarity score (0-100) between query and candidate params.
 
@@ -1046,7 +1058,8 @@ class CategoryIndex:
         # A query without its core value (capacitance / resistance / inductance)
         # cannot be scored meaningfully: package + voltage alone would give 100%.
         core = CORE_PARAMS.get((category or "").upper())
-        if core and not query_params.get(core):
+        # The Spec search may leave the value out on purpose (require_core=False).
+        if require_core and core and not query_params.get(core):
             return 0.0, {}
 
         total_weight = sum(weights.get(p, 0) for p in query_params)
@@ -1140,6 +1153,8 @@ class CategoryIndex:
                     param_score = 100.0 if _norm_str(qval) == _norm_str(cval) else 0.0
 
             weighted_sum += param_score * w
+            if failed is not None and param_score == 0.0:
+                failed.add(pname)
 
             # If a disqualifying param mismatches, the entire candidate is invalid
             if param_score == 0.0 and pname in DISQUALIFYING_PARAMS:
@@ -1242,11 +1257,120 @@ def build_index() -> Dict:
     return _get_index().build_index()
 
 
-def search_by_parameters(category: str, params: Dict[str, str], limit: int = 20) -> List[Dict]:
+def search_by_parameters(category: str, params: Dict[str, str], limit: int = 20,
+                         require_core: bool = True, strict: bool = False) -> List[Dict]:
     """Search for components by category and parameters."""
-    return _get_index().search_by_parameters(category, params, limit)
+    return _get_index().search_by_parameters(category, params, limit, require_core, strict)
 
 
 def get_index_stats() -> Dict:
     """Return current index statistics."""
     return _get_index().get_index_stats()
+
+
+# ===========================================================================
+# Spec search: values typed in the row panel
+# ===========================================================================
+
+# The fields the row panel's Spec search offers per category. The index has no voltage for
+# resistors: match_service.search_by_spec reads it from the ERP description instead.
+SPEC_FIELDS: Dict[str, Tuple[str, ...]] = {
+    "WEERSTANDEN": ("value", "tolerance", "power", "voltage", "package"),
+    "CONDENSATOREN": ("capacitance", "dielectric", "tolerance", "voltage", "package"),
+}
+
+
+def _plain(n: float) -> str:
+    """A number without exponent or trailing zeros: 1000000.0 -> '1000000', 0.0625 -> '0.0625'."""
+    return f"{n:.9f}".rstrip('0').rstrip('.')
+
+
+def _spec_number(text: str) -> Optional[float]:
+    try:
+        return float(_european_decimal(text))
+    except ValueError:
+        return None
+
+
+def _spec_value(text: str) -> Optional[str]:
+    s = re.sub(r'\s+', '', text)
+    # Milliohm (lower-case m before the unit): 330mΩ, 50mOhm. 1MΩ stays a megohm.
+    m = re.match(r'^(\d+(?:[.,]\d+)?)m(?:Ω|ω|ohms?)$', s)
+    if m:
+        milli = _spec_number(m.group(1))
+        return _plain(milli / 1000.0) if milli else None
+    s = s.rstrip('Ωω')
+    if not re.match(r'^\d', s):
+        return None
+    ohms = normalize_resistance(s)
+    return _plain(ohms) if ohms is not None and ohms > 0 else None
+
+
+def _spec_capacitance(text: str) -> Optional[str]:
+    cap = find_capacitance(re.sub(r'\s+', '', text))
+    return cap if cap and normalize_capacitance(cap) else None
+
+
+def _spec_tolerance(text: str) -> Optional[str]:
+    m = re.match(r'^[±+/-]*\s*(\d+(?:[.,]\d+)?)\s*%?$', text)
+    n = _spec_number(m.group(1)) if m else None
+    return _plain(n) + "%" if n is not None else None
+
+
+def _spec_power(text: str) -> Optional[str]:
+    s = re.sub(r'\s+', '', text)
+    m = re.match(r'^(\d+)/(\d+)W?$', s, re.IGNORECASE)
+    if m:
+        watts = int(m.group(1)) / int(m.group(2)) if int(m.group(2)) else None
+    else:
+        m = re.match(r'^(\d+(?:[.,]\d+)?)(mW|W)?$', s, re.IGNORECASE)
+        watts = _spec_number(m.group(1)) if m else None
+        if watts is not None and m.group(2) and m.group(2).lower() == 'mw':
+            watts /= 1000.0
+    return _plain(watts) + "W" if watts else None
+
+
+def _spec_voltage(text: str) -> Optional[str]:
+    s = text.strip()
+    if re.match(r'^\d+(?:[.,]\d+)?$', s):
+        s += 'V'
+    return find_voltage(s)
+
+
+def _spec_dielectric(text: str) -> Optional[str]:
+    d = text.strip().upper().replace('COG', 'C0G').replace('NPO', 'NP0')
+    return d if d in DIELECTRIC_HIERARCHY else None
+
+
+_SPEC_NORMALIZERS = {
+    "value": _spec_value,
+    "capacitance": _spec_capacitance,
+    "tolerance": _spec_tolerance,
+    "power": _spec_power,
+    "voltage": _spec_voltage,
+    "package": lambda t: _parse_package_from_desc(t.strip()),
+    "dielectric": _spec_dielectric,
+}
+
+
+def normalize_spec_query(category: str, params: Dict[str, str]) -> Tuple[Dict[str, str], List[str]]:
+    """Turn the values typed in the Spec search into the notation the index compares.
+
+    20k -> 20000, 4n7 -> 4.7nF, 62.5mW and 1/16W -> watts, 50 -> 50V, SMD0402 -> 0402,
+    COG -> C0G. Empty fields are left out; fields of another category are ignored.
+
+    Returns (params, not_understood): the field names whose text could not be read.
+    """
+    fields = SPEC_FIELDS.get((category or "").upper(), ())
+    out: Dict[str, str] = {}
+    bad: List[str] = []
+    for name in fields:
+        text = str((params or {}).get(name) or '').strip()
+        if not text:
+            continue
+        value = _SPEC_NORMALIZERS[name](text)
+        if value:
+            out[name] = value
+        else:
+            bad.append(name)
+    return out, bad

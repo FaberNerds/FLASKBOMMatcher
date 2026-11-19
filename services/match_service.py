@@ -11,7 +11,7 @@ from typing import List, Dict, Any, Optional
 from services import search_service
 from services.mpn_normalize_service import search_with_variants_batched
 from services.category_detect_service import detect_category, is_generic_rc
-from services.category_index_service import search_by_parameters
+from services.category_index_service import search_by_parameters, find_voltage, _to_numeric
 from services.param_extract_service import (
     extract_parameters, get_match_highlights, get_mpn_highlights
 )
@@ -195,6 +195,64 @@ def _search_row_by_description(row_index: int, search_terms: List[str], selected
     }
 
 
+def _erp_verified(index_results: List[Dict], params: Dict[str, str], category: str,
+                  description: str = "", bom_mpn: str = "") -> List[Dict[str, Any]]:
+    """The index hits that still exist in the ERP, as ERP rows with their score and highlights."""
+    if not index_results:
+        return []
+    item_codes = [r['item_code'] for r in index_results]
+    erp_lookup = {r['FaberNr'].strip(): r for r in search_service.search_by_item_codes(item_codes)}
+
+    suggestions = []
+    for idx_r in index_results:
+        erp_data = erp_lookup.get(idx_r['item_code'])
+        if not erp_data:
+            continue
+        erp_data['_similarity_score'] = idx_r['score']
+        erp_data['_matched_params'] = idx_r.get('matched_params', {})
+        erp_data['_param_highlights'] = get_match_highlights(
+            params, erp_data.get('Omschrijving', ''), category
+        )
+        erp_data['_bom_highlights'] = get_match_highlights(params, description, category)
+        if bom_mpn:
+            erp_data['_mpn_highlights'] = get_mpn_highlights(bom_mpn, erp_data.get('Omschrijving', ''))
+        suggestions.append(erp_data)
+    return suggestions
+
+
+def search_by_spec(category: str, params: Dict[str, str], description: str = "",
+                   selected_klant_nr: str = "", bom_mpn: str = "", limit: int = 150) -> List[Dict[str, Any]]:
+    """Spec search from the row panel: ERP articles of a category by typed parameters.
+
+    The same index and rules as MPNfree matching: value and package must be equal, a tighter
+    tolerance, higher power (resistors) and higher voltage or better dielectric (capacitors)
+    are fine. Unlike MPNfree matching every field is a requirement: an article that states a
+    value outside the spec is left out (one that does not state it stays). The value may be
+    left out. Ranked as Find IPN ranks: complete matches first, then stock and cost.
+
+    Resistor voltage is not in the index (few ERP descriptions state it): it is read from the
+    description, a lower voltage drops the article, an article without one stays.
+    """
+    query = dict(params)
+    min_volt = None
+    if category == 'WEERSTANDEN' and 'voltage' in query:
+        min_volt = _to_numeric('voltage', query.pop('voltage'))
+    if not query:
+        return []
+
+    index_results = search_by_parameters(category, query, limit=limit, require_core=False, strict=True)
+    if min_volt:
+        def voltage_ok(r):
+            found = find_voltage(r.get('description') or '')
+            volts = _to_numeric('voltage', found) if found else None
+            return volts is None or volts >= min_volt
+        index_results = [r for r in index_results if voltage_ok(r)]
+
+    suggestions = _erp_verified(index_results, params, category, description, bom_mpn)
+    logger.info(f"Spec search [{category}] {params}: {len(index_results)} index hits, {len(suggestions)} in ERP")
+    return _rank_suggestions(suggestions, selected_klant_nr)
+
+
 def _search_row_by_parameters(row_index: int, description: str, category: str, selected_klant_nr: str = "", bom_mpn: str = "") -> Dict[str, Any]:
     """Search a single row using parameterized matching against the SQLite index.
 
@@ -215,33 +273,7 @@ def _search_row_by_parameters(row_index: int, description: str, category: str, s
         logger.info(f"Row {row_index}: PARAM no index hits for {params} [{category}]")
         return None  # Signal to fall back
 
-    # Verify top candidates via live ERP
-    item_codes = [r['item_code'] for r in index_results]
-    erp_results = search_service.search_by_item_codes(item_codes)
-
-    # Build lookup from ERP results
-    erp_lookup = {r['FaberNr'].strip(): r for r in erp_results}
-
-    # Merge index scores with ERP data
-    suggestions = []
-    for idx_r in index_results:
-        erp_data = erp_lookup.get(idx_r['item_code'])
-        if not erp_data:
-            continue
-
-        # Add scoring and highlight data
-        erp_data['_similarity_score'] = idx_r['score']
-        erp_data['_matched_params'] = idx_r.get('matched_params', {})
-        erp_data['_param_highlights'] = get_match_highlights(
-            params, erp_data.get('Omschrijving', ''), category
-        )
-        erp_data['_bom_highlights'] = get_match_highlights(
-            params, description, category
-        )
-        if bom_mpn:
-            erp_data['_mpn_highlights'] = get_mpn_highlights(bom_mpn, erp_data.get('Omschrijving', ''))
-        suggestions.append(erp_data)
-
+    suggestions = _erp_verified(index_results, params, category, description, bom_mpn)
     if not suggestions:
         logger.info(f"Row {row_index}: PARAM no ERP-verified results for {params}")
         return None  # Signal to fall back

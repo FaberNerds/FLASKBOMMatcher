@@ -1436,6 +1436,205 @@ body.col-resizing * {
     color: var(--ink-muted);
 }
 
+/* Sortable column heads of the candidate table */
+.xmini th .xsort {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.xmini th .xsort:hover {
+    color: var(--steel);
+}
+
+.xmini th .xsort:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+.xmini th .xsort.is-on {
+    color: var(--steel);
+}
+
+.xsort-i {
+    font-size: 8px;
+    line-height: 1;
+}
+
+.xmini th .xsort:not(.is-on):hover .xsort-i::before {
+    content: '\2195';
+    font-size: 11px;
+    opacity: 0.5;
+}
+
+/* Spec search: the mode row on top, one field per parameter below it */
+.xsearch.is-spec {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.xsrow,
+.xsfields {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.xsfields {
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.xsf {
+    display: flex;
+    align-items: stretch;
+    height: 34px;
+    border: 1px solid var(--line-control);
+    border-radius: 10px;
+    background: var(--surface-raised);
+    overflow: hidden;
+}
+
+.xsf:focus-within {
+    border-color: var(--focus);
+    box-shadow: 0 0 0 1px var(--focus);
+}
+
+/* The value equals the BOM line's own */
+.xsf.is-bom {
+    border-color: #e2c89c;
+    background: var(--gold-soft);
+}
+
+.xsf.is-bad {
+    border-color: var(--danger);
+    background: var(--danger-soft);
+}
+
+/* The field's name is a button: click to leave the field out of the search */
+.xsf-l {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 0 4px 0 9px;
+    border: 0;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.xsf-l:hover b {
+    color: var(--ink);
+    text-decoration: underline;
+}
+
+.xsf-l:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+    border-radius: 9px;
+}
+
+/* Left out of the search: grey, name struck through, value kept */
+.xsf.is-off,
+.xsf.is-off.is-bom {
+    border-style: dashed;
+    border-color: var(--line-control-strong);
+    background: var(--surface-sunken);
+}
+
+.xsf.is-off .xsf-l b {
+    text-decoration: line-through;
+}
+
+.xsf.is-off input,
+.xsf.is-off .xsf-bom {
+    color: var(--ink-muted);
+    opacity: 0.6;
+}
+
+.xsf-l b {
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+}
+
+.xsf-l i {
+    font-style: normal;
+    font-size: 10.5px;
+    line-height: 12px;
+    color: var(--ink-muted);
+}
+
+.xpanel .xsf input {
+    width: 84px;
+    height: 100%;
+    padding: 0 8px 0 6px;
+    border: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--ink);
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+}
+
+.xsf-bom {
+    padding: 0 9px;
+    border: 0;
+    border-left: 1px solid var(--line-solid);
+    background: transparent;
+    color: var(--gold);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+}
+
+.xsf-bom:hover {
+    background: var(--gold-soft);
+}
+
+.xsf.is-bom .xsf-bom {
+    border-left-color: #e2c89c;
+}
+
+.xsf-bom:focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: -2px;
+}
+
+.xpanel .xsearch .btn.xsf-all {
+    color: var(--gold);
+    background: var(--gold-soft);
+    border-color: #e2c89c;
+}
+
+.xpanel .xsearch .btn.xsf-all:hover:not(:disabled) {
+    border-color: var(--gold);
+}
+
+.xpanel .xsearch .btn.xsf-all:disabled {
+    cursor: default;
+    opacity: 0.5;
+    color: var(--gold);
+}
+
 @media (max-width: 1360px) {
     .xpanel {
         grid-template-columns: 250px minmax(0, 1fr);

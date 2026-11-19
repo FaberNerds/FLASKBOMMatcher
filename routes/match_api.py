@@ -11,7 +11,11 @@ from services.session_service import (
     save_selections, load_selections,
     save_to_history
 )
-from services.match_service import find_ipn_batch, find_ipn_single, filter_customer_specific, keep_selected_articles
+from services.match_service import (
+    find_ipn_batch, find_ipn_single, filter_customer_specific, keep_selected_articles,
+    search_by_spec, _get_mapped_value,
+)
+from services.category_index_service import normalize_spec_query
 from services.previous_bom_match_service import (
     match_against_previous_bom, match_previous_single,
 )
@@ -228,6 +232,54 @@ def manual_search():
         })
     except Exception as e:
         logger.error(f"manual_search error: {e}")
+        return jsonify({'error': f'Search failed: {str(e)}'}), 500
+
+
+SPEC_CATEGORIES = {'RES': 'WEERSTANDEN', 'CAP': 'CONDENSATOREN'}
+SPEC_LABELS = {'value': 'Value', 'capacitance': 'Capacitance', 'tolerance': 'Tolerance', 'power': 'Power',
+               'voltage': 'Voltage', 'package': 'Package', 'dielectric': 'Dielectric'}
+
+
+@match_bp.route('/match/spec-search', methods=['POST'])
+def spec_search():
+    """Spec search from the row panel (a preview: the line changes once a result is used).
+
+    Body: {row_index, kind: 'RES' | 'CAP', params: {value, tolerance, power, voltage, package}
+    or {capacitance, dielectric, tolerance, voltage, package}}. Fields left out are not searched on.
+    """
+    data = request.get_json() or {}
+    category = SPEC_CATEGORIES.get(str(data.get('kind', '')).upper())
+    if not category:
+        return jsonify({'error': 'Choose RES or CAP'}), 400
+
+    params, bad = normalize_spec_query(category, data.get('params') or {})
+    if bad:
+        names = ', '.join(SPEC_LABELS.get(b, b) for b in bad)
+        return jsonify({'error': f'Not understood: {names}. Check the notation (e.g. 4k7, 100nF, 1%, 1/16W, 50V, 0603).',
+                        'fields': bad}), 400
+    if not params:
+        return jsonify({'error': 'Fill in at least one field', 'fields': []}), 400
+    if set(params) == {'voltage'} and category == 'WEERSTANDEN':
+        return jsonify({'error': 'Voltage alone is too broad for resistors. Add a value, power or package.',
+                        'fields': ['voltage']}), 400
+
+    bom_data = load_bom_data() or {}
+    rows = bom_data.get('rows', [])
+    mapping = bom_data.get('column_mapping', {})
+    row_index = data.get('row_index')
+    row = rows[row_index] if isinstance(row_index, int) and 0 <= row_index < len(rows) else {}
+
+    logger.info(f"Spec search row {row_index}: {category} {params}")
+    try:
+        suggestions = search_by_spec(
+            category, params,
+            description=_get_mapped_value(row, mapping, 'Description') if row else '',
+            selected_klant_nr=bom_data.get('klant_nr', ''),
+            bom_mpn=_get_mapped_value(row, mapping, 'MPN') if row else '',
+        )
+        return jsonify({'success': True, 'suggestions': suggestions[:30], 'query': params})
+    except Exception as e:
+        logger.error(f"spec_search error: {e}")
         return jsonify({'error': f'Search failed: {str(e)}'}), 500
 
 
